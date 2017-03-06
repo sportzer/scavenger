@@ -1,0 +1,6 @@
+[package]
+name = "scavenger"
+version = "0.1.0"
+authors = ["Steven Portzer <stevenportzer@gmail.com>"]
+
+[dependencies]
