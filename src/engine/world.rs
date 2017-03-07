@@ -48,6 +48,8 @@ pub trait ComponentStorage<I: Id, C: Component>: EntityStorage<I> {
     fn insert(&mut self, id: I, c: C) -> Option<C>;
     fn remove(&mut self, id: I) -> Option<C>;
 
+    fn get_or_else<F: FnOnce() -> C>(&mut self, id: I, f: F) -> &mut C;
+
     fn ids<'a>(&'a self) -> Box<Iterator<Item=I> + 'a>;
     fn iter<'a>(&'a self) -> Box<Iterator<Item=(I, &C)> + 'a>;
     fn iter_mut<'a>(&'a mut self) -> Box<Iterator<Item=(I, &mut C)> + 'a>;
@@ -121,12 +123,14 @@ macro_rules! world {
 
         $(
             impl $crate::engine::EntityStorage<$id> for $name {
+                #[allow(unused_variables)]
                 fn visit_component_types<V: $crate::engine::VisitComponentTypes<Self, $id>>(&self, v: &mut V) {
                     $(
                         v.visit::<$component>(self);
                     )*
                 }
 
+                #[allow(unused_variables)]
                 fn visit_component_types_mut<V: $crate::engine::VisitComponentTypesMut<Self, $id>>(&mut self, v: &mut V) {
                     $(
                         v.visit_mut::<$component>(self);
@@ -166,6 +170,12 @@ macro_rules! world {
                         storage.remove(&id)
                     }
 
+                    fn get_or_else<F: FnOnce() -> $component>(&mut self, id: $id, f: F) -> &mut $component {
+                        let storage: &mut ::std::collections::BTreeMap<$id, $component> =
+                            $crate::engine::hlist::Get::get_mut(&mut self.0);
+                        storage.entry(id).or_insert_with(f)
+                    }
+
                     fn ids<'a>(&'a self) -> Box<Iterator<Item=$id> + 'a> {
                         let storage: &::std::collections::BTreeMap<$id, $component> =
                             $crate::engine::hlist::Get::get(&self.0);
@@ -202,15 +212,15 @@ pub struct EntityRef<'a, S: EntityStorage<I> + 'a, I: Id> {
 }
 
 impl<'a, S: EntityStorage<I> + 'a, I: Id> EntityRef<'a, S, I> {
-    fn has_component<C: Component>(&self) -> bool where S: ComponentStorage<I, C> {
+    pub fn has_component<C: Component>(&self) -> bool where S: ComponentStorage<I, C> {
         self.world.has_component::<C>(self.id)
     }
 
-    fn get<C: Component>(&self) -> Option<&C> where S: ComponentStorage<I, C> {
+    pub fn get<C: Component>(&self) -> Option<&C> where S: ComponentStorage<I, C> {
         self.world.get(self.id)
     }
 
-    fn get_ref<C: Component>(&self) -> Option<ComponentRef<S, I, C>> where S: ComponentStorage<I, C> {
+    pub fn get_ref<C: Component>(&self) -> Option<ComponentRef<S, I, C>> where S: ComponentStorage<I, C> {
         self.world.get(self.id).map(|c| ComponentRef {
             world: self.world,
             component: c,
@@ -218,11 +228,11 @@ impl<'a, S: EntityStorage<I> + 'a, I: Id> EntityRef<'a, S, I> {
         })
     }
 
-    fn id(&self) -> I {
+    pub fn id(&self) -> I {
         self.id
     }
 
-    fn world(&self) -> &S {
+    pub fn world(&self) -> &S {
         &self.world
     }
 }
@@ -233,15 +243,15 @@ pub struct EntityMut<'a, S: EntityStorage<I> + 'a, I: Id> {
 }
 
 impl<'a, S: EntityStorage<I> + 'a, I: Id> EntityMut<'a, S, I> {
-    fn has_component<C: Component>(&self) -> bool where S: ComponentStorage<I, C> {
+    pub fn has_component<C: Component>(&self) -> bool where S: ComponentStorage<I, C> {
         self.world.has_component::<C>(self.id)
     }
 
-    fn get<C: Component>(&self) -> Option<&C> where S: ComponentStorage<I, C> {
+    pub fn get<C: Component>(&self) -> Option<&C> where S: ComponentStorage<I, C> {
         self.world.get(self.id)
     }
 
-    fn get_ref<C: Component>(&self) -> Option<ComponentRef<S, I, C>> where S: ComponentStorage<I, C> {
+    pub fn get_ref<C: Component>(&self) -> Option<ComponentRef<S, I, C>> where S: ComponentStorage<I, C> {
         self.world.get(self.id).map(|c| ComponentRef {
             world: self.world,
             component: c,
@@ -249,31 +259,35 @@ impl<'a, S: EntityStorage<I> + 'a, I: Id> EntityMut<'a, S, I> {
         })
     }
 
-    fn get_mut<C: Component>(&mut self) -> Option<&mut C> where S: ComponentStorage<I, C> {
+    pub fn get_mut<C: Component>(&mut self) -> Option<&mut C> where S: ComponentStorage<I, C> {
         self.world.get_mut(self.id)
     }
 
-    fn insert<C: Component>(&mut self, c: C) -> Option<C> where S: ComponentStorage<I, C> {
+    pub fn insert<C: Component>(&mut self, c: C) -> Option<C> where S: ComponentStorage<I, C> {
         self.world.insert(self.id, c)
     }
 
-    fn remove<C: Component>(&mut self) -> Option<C> where S: ComponentStorage<I, C> {
+    pub fn remove<C: Component>(&mut self) -> Option<C> where S: ComponentStorage<I, C> {
         self.world.remove(self.id)
     }
 
-    fn id(&self) -> I {
+    pub fn get_or_else<C: Component, F: FnOnce() -> C>(&mut self, f: F) -> &mut C where S: ComponentStorage<I, C> {
+        self.world.get_or_else(self.id, f)
+    }
+
+    pub fn id(&self) -> I {
         self.id
     }
 
-    fn world(&self) -> &S {
+    pub fn world(&self) -> &S {
         &self.world
     }
 
-    fn world_mut(&mut self) -> &mut S {
+    pub fn world_mut(&mut self) -> &mut S {
         &mut self.world
     }
 
-    fn as_ref(&self) -> EntityRef<S, I> {
+    pub fn as_ref(&self) -> EntityRef<S, I> {
         EntityRef {
             world: self.world,
             id: self.id,
@@ -289,15 +303,15 @@ pub struct ComponentRef<'a, S: ComponentStorage<I, C> + 'a, I: Id, C: Component 
 }
 
 impl<'a, I: Id, C: Component + 'a, S: ComponentStorage<I, C> + 'a> ComponentRef<'a, S, I, C> {
-    fn id(&self) -> I {
+    pub fn id(&self) -> I {
         self.id
     }
 
-    fn world(&self) -> &S {
+    pub fn world(&self) -> &S {
         &self.world
     }
 
-    fn as_entity_ref(&self) -> EntityRef<S, I> {
+    pub fn as_entity_ref(&self) -> EntityRef<S, I> {
         EntityRef {
             world: self.world,
             id: self.id,

@@ -5,5 +5,7 @@
 mod engine;
 use engine::*;
 
+mod game;
+use game::*;
 
 fn main() {}

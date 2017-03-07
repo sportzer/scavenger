@@ -1,3 +1,5 @@
+use super::Id;
+
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
 pub enum Direction {
     North,
@@ -57,6 +59,8 @@ pub struct Position {
     pub x: i32,
     pub y: i32,
 }
+
+impl Id for Position {}
 
 impl Position {
     pub fn step(self, d: Direction) -> Position {
