@@ -1,35 +1,18 @@
+use super::Color;
 use ::engine::*;
 
-enum EntityClass {
+#[derive(Debug, Eq, PartialEq)]
+pub enum EntityClass {
     Item,
     Creature,
     Player,
 }
 
-enum Color {
-    Black = 0,
-    Red = 1,
-    Green = 2,
-    Yellow = 3,
-    Blue = 4,
-    Magenta = 5,
-    Cyan = 6,
-    White = 7,
-    DarkGray = 8,
-    DarkRed = 9,
-    DarkGreen = 10,
-    DarkYellow = 11,
-    DarkBlue = 12,
-    DarkMagenta = 13,
-    DarkCyan = 14,
-    Gray = 15,
-}
-
-struct EntityData {
-    class: EntityClass,
-    name: &'static str,
-    ch: char,
-    color: Color,
+pub struct EntityData {
+    pub class: EntityClass,
+    pub name: &'static str,
+    pub ch: char,
+    pub color: Color,
 }
 
 macro_rules! entity_data {
@@ -37,7 +20,7 @@ macro_rules! entity_data {
         pub enum EntityType { $($name,)* }
 
         impl EntityType {
-            fn data(&self) -> &'static EntityData {
+            pub fn data(&self) -> &'static EntityData {
                 match self { $(
                     &EntityType::$name => {
                         static DATA: &'static EntityData = &EntityData { $($tt)* };
@@ -56,13 +39,13 @@ entity_data! {
         class: EntityClass::Item,
         name: "rock",
         ch: ',',
-        color: Color::Gray,
+        color: Color::White,
     }
-    Muskrat: {
+    Rat: {
         class: EntityClass::Creature,
-        name: "muskrat",
-        ch: 'm',
-        color: Color::DarkYellow,
+        name: "rat",
+        ch: 'r',
+        color: Color::White,
     }
     Player: {
         class: EntityClass::Player,
