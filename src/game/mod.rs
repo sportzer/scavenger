@@ -1,6 +1,9 @@
 use std::collections::BTreeSet;
 use ::engine::*;
 
+mod entity;
+use self::entity::*;
+
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq, Ord, PartialOrd)]
 struct Entity(u64);
 
@@ -22,6 +25,7 @@ impl Component for Contents {}
 world! {
     World {
         Entity: {
+            EntityType,
             Location,
             Contents,
         }
