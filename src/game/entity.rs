@@ -1,5 +1,5 @@
-use super::Color;
 use ::engine::*;
+use super::Color;
 
 #[derive(Debug, Eq, PartialEq)]
 pub enum EntityClass {

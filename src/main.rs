@@ -15,21 +15,12 @@ use game::*;
 
 fn main() {
     let mut g = Game::new();
-
-    g.put_entity(EntityType::Rat, Position { x: 3, y: 3 });
-    g.put_entity(EntityType::Player, Position { x: 3, y: 3 });
-    g.put_entity(EntityType::Rock, Position { x: 3, y: 3 });
-
-    g.put_entity(EntityType::Rat, Position { x: 5, y: 3 });
-    g.put_entity(EntityType::Rock, Position { x: 5, y: 3 });
-
-    g.put_entity(EntityType::Rock, Position { x: 4, y: 4 });
-    g.put_entity(EntityType::Rat, Position { x: 4, y: 4 });
-
-    g.put_entity(EntityType::Rock, Position { x: 6, y: 4 });
+    init_game(&mut g);
 
     let window = pancurses::initscr();
+    window.keypad(true);
     pancurses::noecho();
+    pancurses::cbreak();
     pancurses::curs_set(0);
 
     if pancurses::has_colors() {
@@ -43,8 +34,8 @@ fn main() {
 
     fn put_cell(window: &Window, y: i32, x: i32, c: Cell) {
         window.mvaddch(y, x, c.ch);
-        window.mvchgat(y, x, 1, pancurses::A_NORMAL,
-                       (c.fg as i16) + (c.bg as i16)*8 + 1);
+        let attr = if c.bold { pancurses::A_BOLD } else { pancurses::A_NORMAL };
+        window.mvchgat(y, x, 1, attr, (c.fg as i16) + (c.bg as i16)*8 + 1);
     }
 
     window.clear();
@@ -56,6 +47,7 @@ fn main() {
     }
     window.refresh();
 
-    window.getch();
+    let key = window.getch();
     pancurses::endwin();
+    println!("{:?}", key);
 }

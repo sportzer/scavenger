@@ -4,7 +4,10 @@ use ::engine::*;
 
 // TODO: how much of this stuff really need to be public?
 mod entity;
-pub use self::entity::*;
+use self::entity::*;
+
+mod position;
+use self::position::*;
 
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq, Ord, PartialOrd)]
 struct Entity(u64);
@@ -23,11 +26,13 @@ pub enum Color {
     White = 7,
 }
 
+// TODO: allow bold attribute?
 #[derive(Debug)]
 pub struct Cell {
     pub ch: char,
     pub fg: Color,
     pub bg: Color,
+    pub bold: bool,
 }
 
 // TODO: impl From<Entity>, From<Position>, etc
@@ -53,6 +58,7 @@ world! {
         }
         Position: {
             Contents,
+            Tile,
         }
     }
 }
@@ -113,7 +119,7 @@ impl Game {
     }
 
     // TODO: this is a temporary (for testing)
-    pub fn put_entity(&mut self, t: EntityType, p: Position) {
+    fn put_entity(&mut self, t: EntityType, p: Position) {
         let id = Entity(self.next_id);
         self.next_id += 1;
         self.world.insert(id, t);
@@ -140,18 +146,67 @@ impl Game {
             }
         }
 
-        data.map(|d| {
+        let cell = self.world.entity_ref(p).get::<Tile>().map(Tile::render)
+            .unwrap_or(
+                Cell {
+                    ch: ' ',
+                    fg: Color::Black,
+                    bg: Color::Black,
+                    bold: false,
+                }
+            );
+
+        if let Some(d) = data {
             Cell {
                 ch: d.ch,
                 fg: d.color,
-                bg: Color::Black,
+                bg: cell.bg,
+                bold: d.class != EntityClass::Item,
             }
-        }).unwrap_or(
-            Cell {
-                ch: ' ',
-                fg: Color::Black,
-                bg: Color::Black,
-            }
-        )
+        } else {
+            cell
+        }
     }
+}
+
+// TODO: this is temporary
+pub fn init_game(g: &mut Game) {
+    g.put_entity(EntityType::Rat, Position { x: 3, y: 3 });
+    g.put_entity(EntityType::Player, Position { x: 3, y: 3 });
+    g.put_entity(EntityType::Rock, Position { x: 3, y: 3 });
+
+    g.put_entity(EntityType::Rat, Position { x: 5, y: 3 });
+    g.put_entity(EntityType::Rock, Position { x: 5, y: 3 });
+
+    g.put_entity(EntityType::Rock, Position { x: 4, y: 4 });
+    g.put_entity(EntityType::Rat, Position { x: 4, y: 4 });
+
+    g.put_entity(EntityType::Rock, Position { x: 6, y: 4 });
+
+    for x in 0..9 {
+        for y in 0..9 {
+            let tile = if x%8 == 0 || y%8 == 0 { Tile::Wall } else { Tile::Ground };
+            g.world.insert(Position{ x, y }, tile);
+        }
+    }
+
+    g.world.insert(Position{ x: 6, y: 5 }, Tile::ShallowWater);
+    g.world.insert(Position{ x: 7, y: 5 }, Tile::ShallowWater);
+    g.world.insert(Position{ x: 6, y: 6 }, Tile::ShallowWater);
+    g.world.insert(Position{ x: 7, y: 6 }, Tile::DeepWater);
+    g.world.insert(Position{ x: 6, y: 7 }, Tile::DeepWater);
+    g.world.insert(Position{ x: 7, y: 7 }, Tile::DeepWater);
+
+    g.put_entity(EntityType::Rock, Position { x: 7, y: 5 });
+    g.put_entity(EntityType::Rock, Position { x: 7, y: 6 });
+
+    g.world.insert(Position{ x: 1, y: 4 }, Tile::ShortGrass);
+    g.world.insert(Position{ x: 2, y: 4 }, Tile::ShortGrass);
+    g.world.insert(Position{ x: 3, y: 4 }, Tile::ShortGrass);
+    g.world.insert(Position{ x: 1, y: 5 }, Tile::LongGrass);
+    g.world.insert(Position{ x: 2, y: 5 }, Tile::LongGrass);
+    g.world.insert(Position{ x: 3, y: 5 }, Tile::LongGrass);
+    g.world.insert(Position{ x: 1, y: 6 }, Tile::LongGrass);
+    g.world.insert(Position{ x: 2, y: 6 }, Tile::LongGrass);
+    g.world.insert(Position{ x: 3, y: 6 }, Tile::LongGrass);
 }
