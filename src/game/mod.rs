@@ -49,18 +49,28 @@ struct Contents(BTreeSet<Entity>);
 
 impl Component for Contents {}
 
+struct IsPlayer;
+
+impl Component for IsPlayer {}
+
 world! {
     GameWorld {
         Entity: {
             EntityType,
             Location,
             Contents,
+            IsPlayer,
         }
         Position: {
             Contents,
             Tile,
         }
     }
+}
+
+pub enum Action {
+    Wait,
+    Move(Direction),
 }
 
 impl GameWorld {
@@ -118,10 +128,56 @@ impl Game {
         }
     }
 
+    pub fn take_turn(&mut self, action: Action) {
+        // TODO: make sure there is at most one player?
+        let player = self.world.component_ids::<IsPlayer>().next();
+        if let Some(player) = player {
+            match action {
+                Action::Wait => { /* TODO */ }
+                Action::Move(dir) => {
+                    let moved = self.move_entity(player, dir);
+                    if !moved { return; }
+                }
+            }
+        }
+
+        // TODO: creature actions
+    }
+
+    fn move_entity(&mut self, id: Entity, dir: Direction) -> bool {
+        let location: Option<Location> = self.world.get(id).map(|&l| l);
+        if let Some(Location::Position(pos)) = location {
+            let new_pos = pos.step(dir);
+            if self.world.entity_ref(new_pos).get::<Tile>()
+                .map(Tile::is_walkable).unwrap_or(false)
+            {
+                // TODO: make sure there is only one valid target in location?
+                let target = self.world.entity_ref(new_pos).get::<Contents>()
+                    .and_then(|contents|
+                         contents.0.iter().find(|&&id| {
+                             self.world.entity_ref(id).get::<EntityType>().map(
+                                 |t| t.data().class == EntityClass::Creature
+                             ).unwrap_or(false)
+                         })
+                    ).map(|&id| id);
+                if let Some(target) = target {
+                    // TODO: melee attack target
+                } else {
+                    self.world.set_location(id, Location::Position(new_pos));
+                }
+                return true;
+            }
+        }
+        false
+    }
+
     // TODO: this is a temporary (for testing)
     fn put_entity(&mut self, t: EntityType, p: Position) {
         let id = Entity(self.next_id);
         self.next_id += 1;
+        if t.data().class == EntityClass::Player {
+            self.world.insert(id, IsPlayer);
+        }
         self.world.insert(id, t);
         self.world.set_location(id, Location::Position(p));
     }

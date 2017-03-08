@@ -1,6 +1,7 @@
 use ::engine::*;
 use super::{Color, Cell};
 
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub enum Tile {
     Wall,
     Ground,
@@ -52,5 +53,9 @@ impl Tile {
                 bold: false,
             },
         }
+    }
+
+    pub fn is_walkable(&self) -> bool {
+        self != &Tile::Wall && self != &Tile::DeepWater
     }
 }
