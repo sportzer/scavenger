@@ -49,6 +49,9 @@ pub trait ComponentStorage<I: Id, C: Component>: EntityStorage<I> {
     fn remove(&mut self, id: I) -> Option<C>;
 
     fn get_or_else<F: FnOnce() -> C>(&mut self, id: I, f: F) -> &mut C;
+    fn get_or_default(&mut self, id: I) -> &mut C where C: Default {
+        self.get_or_else(id, Default::default)
+    }
 
     fn ids<'a>(&'a self) -> Box<Iterator<Item=I> + 'a>;
     fn iter<'a>(&'a self) -> Box<Iterator<Item=(I, &C)> + 'a>;

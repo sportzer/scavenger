@@ -1,22 +1,42 @@
 use ::engine::*;
 use super::Color;
 
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Debug)]
 pub enum EntityClass {
     Item,
-    Creature,
-    Player,
+    Actor {
+        max_health: i8,
+        max_stamina: i8,
+        max_satiation: i16,
+    },
 }
 
 pub struct EntityData {
-    pub class: EntityClass,
     pub name: &'static str,
     pub ch: char,
-    pub color: Color,
+    pub color: Option<Color>,
+    pub class: EntityClass,
+}
+
+impl EntityData {
+    pub fn is_item(&self) -> bool {
+        match self.class {
+            EntityClass::Item => true,
+            _ => false,
+        }
+    }
+
+    pub fn is_actor(&self) -> bool {
+        match self.class {
+            EntityClass::Actor { .. } => true,
+            _ => false,
+        }
+    }
 }
 
 macro_rules! entity_data {
     ($($name:ident: { $($tt:tt)* })*) => {
+        #[derive(Copy, Clone, Debug, Eq, PartialEq)]
         pub enum EntityType { $($name,)* }
 
         impl EntityType {
@@ -36,21 +56,29 @@ impl Component for EntityType {}
 
 entity_data! {
     Rock: {
-        class: EntityClass::Item,
         name: "rock",
         ch: ',',
-        color: Color::White,
+        color: Some(Color::White),
+        class: EntityClass::Item,
     }
     Rat: {
-        class: EntityClass::Creature,
         name: "rat",
         ch: 'r',
-        color: Color::White,
+        color: Some(Color::White),
+        class: EntityClass::Actor {
+            max_health: 2,
+            max_stamina: 2,
+            max_satiation: 20,
+        },
     }
     Player: {
-        class: EntityClass::Player,
         name: "player",
         ch: '@',
-        color: Color::Yellow,
+        color: None,
+        class: EntityClass::Actor {
+            max_health: 10,
+            max_stamina: 10,
+            max_satiation: 100,
+        },
     }
 }

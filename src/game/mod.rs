@@ -9,6 +9,9 @@ use self::entity::*;
 mod position;
 use self::position::*;
 
+mod stats;
+use self::stats::*;
+
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq, Ord, PartialOrd)]
 struct Entity(u64);
 
@@ -60,6 +63,9 @@ world! {
             Location,
             Contents,
             IsPlayer,
+            Damage,
+            Exhaustion,
+            Hunger,
         }
         Position: {
             Contents,
@@ -156,12 +162,12 @@ impl Game {
                     .and_then(|contents|
                          contents.0.iter().find(|&&id| {
                              self.world.entity_ref(id).get::<EntityType>().map(
-                                 |t| t.data().class == EntityClass::Creature
+                                 |t| t.data().is_actor()
                              ).unwrap_or(false)
                          })
                     ).map(|&id| id);
                 if let Some(target) = target {
-                    // TODO: melee attack target
+                    self.attack(id, target);
                 } else {
                     self.world.set_location(id, Location::Position(new_pos));
                 }
@@ -171,11 +177,41 @@ impl Game {
         false
     }
 
+    fn attack(&mut self, attacker: Entity, target: Entity) {
+        // TODO: make this less bad
+        if let Some(&EntityClass::Actor { max_health, .. }) =
+            self.world.entity_ref(target).get::<EntityType>().map(|t| &t.data().class)
+        {
+            let total_damage = {
+                let damage_mut: &mut Damage = self.world.get_or_default(target);
+                damage_mut.0 += 1;
+                damage_mut.0
+            };
+            if total_damage >= max_health {
+                self.destroy_entity(target);
+            }
+        }
+    }
+
+    fn destroy_entity(&mut self, id: Entity) {
+        self.world.remove_location(id);
+
+        struct DestroyEntityVisitor<I: Id>(I);
+        impl<S: EntityStorage<I>, I: Id> VisitComponentTypesMut<S, I> for DestroyEntityVisitor<I> {
+            fn visit_mut<C: Component>(&mut self, s: &mut S)
+                where S: ComponentStorage<I, C>
+            {
+                s.remove(self.0);
+            }
+        }
+        self.world.visit_component_types_mut(&mut DestroyEntityVisitor(id));
+    }
+
     // TODO: this is a temporary (for testing)
     fn put_entity(&mut self, t: EntityType, p: Position) {
         let id = Entity(self.next_id);
         self.next_id += 1;
-        if t.data().class == EntityClass::Player {
+        if t == EntityType::Player {
             self.world.insert(id, IsPlayer);
         }
         self.world.insert(id, t);
@@ -190,12 +226,7 @@ impl Game {
                 if let Some(entity_data) = self.world.entity_ref(e)
                     .get::<EntityType>().map(|t| t.data())
                 {
-                    if entity_data.class == EntityClass::Player
-                        || data.map(|d| {
-                            d.class != EntityClass::Player && entity_data.class == EntityClass::Creature
-                            || d.class == EntityClass::Item && entity_data.class == EntityClass::Item
-                        }).unwrap_or(true)
-                    {
+                    if data.is_none() || entity_data.is_actor() {
                         data = Some(entity_data);
                     }
                 }
@@ -215,9 +246,9 @@ impl Game {
         if let Some(d) = data {
             Cell {
                 ch: d.ch,
-                fg: d.color,
+                fg: d.color.unwrap_or(cell.fg),
                 bg: cell.bg,
-                bold: d.class != EntityClass::Item,
+                bold: d.is_actor(),
             }
         } else {
             cell
@@ -227,7 +258,6 @@ impl Game {
 
 // TODO: this is temporary
 pub fn init_game(g: &mut Game) {
-    g.put_entity(EntityType::Rat, Position { x: 3, y: 3 });
     g.put_entity(EntityType::Player, Position { x: 3, y: 3 });
     g.put_entity(EntityType::Rock, Position { x: 3, y: 3 });
 
