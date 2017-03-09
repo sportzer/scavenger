@@ -15,7 +15,6 @@ use game::*;
 
 fn main() {
     let mut g = Game::new();
-    init_game(&mut g);
 
     let window = pancurses::initscr();
     window.keypad(true);
@@ -41,11 +40,19 @@ fn main() {
     loop {
         window.clear();
         let (max_y, max_x) = window.get_max_yx();
-        for y in 0..max_y {
-            for x in 0..max_x {
-                put_cell(&window, y, x, g.render(Position { x, y }));
+
+        window.color_set(4+4*8+1);
+        window.mv(0, 0);
+        window.hline('-', max_x);
+        window.color_set(3+4*8+1);
+        window.mvaddstr(0, 0, &g.player_status());
+
+        for y in 0..max_y-2 {
+            for x in 0..max_x-1 {
+                put_cell(&window, y+2, x+1, g.render(Position { x, y }));
             }
         }
+
         window.refresh();
 
         let key = window.getch();
@@ -113,6 +120,7 @@ fn main() {
                         while window.getch().is_some() {}
                         window.nodelay(false);
                     }
+                    'N' => { g = Game::new(); }
                     _ => {}
                 }}
                 _ => {}

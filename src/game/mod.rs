@@ -13,7 +13,7 @@ mod stats;
 use self::stats::*;
 
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq, Ord, PartialOrd)]
-struct Entity(u64);
+pub struct Entity(u64);
 
 impl Id for Entity {}
 
@@ -67,6 +67,7 @@ world! {
             Exhaustion,
             Hunger,
             CorpseType,
+            AiState,
         }
         Position: {
             Contents,
@@ -129,10 +130,12 @@ pub struct Game {
 
 impl Game {
     pub fn new() -> Game {
-        Game {
+        let mut g = Game {
             world: GameWorld::new(),
             next_id: 1,
-        }
+        };
+        init_game(&mut g);
+        g
     }
 
     pub fn take_turn(&mut self, action: Action) {
@@ -149,6 +152,11 @@ impl Game {
         }
 
         // TODO: creature actions
+        let creatures: Vec<Entity> = self.world.component_ids::<AiState>().collect();
+        for id in creatures {
+            // TODO: add real AI
+            self.move_entity(id, Direction::West);
+        }
 
         // TODO: per turn processing
     }
@@ -181,17 +189,79 @@ impl Game {
     }
 
     fn attack(&mut self, attacker: Entity, target: Entity) {
+        // TODO: figure out whether I want these checks or not
+        if !self.is_actor(attacker) || !self.is_actor(target) { return; }
+        if self.is_player(attacker) == self.is_player(target) { return; }
+
         // TODO: make this less bad
+        self.add_damage(target, 1);
+    }
+
+    fn is_player(&self, id: Entity) -> bool {
+        self.world.entity_ref(id).get::<IsPlayer>().is_some()
+    }
+
+    fn is_actor(&self, id: Entity) -> bool {
+        self.world.entity_ref(id).get::<EntityType>()
+            .map(|t| t.data().is_actor()).unwrap_or(false)
+    }
+
+    fn add_damage(&mut self, target: Entity, damage: i8) {
         if let Some(&EntityClass::Actor { max_health, .. }) =
             self.world.entity_ref(target).get::<EntityType>().map(|t| &t.data().class)
         {
             let total_damage = {
-                let damage_mut: &mut Damage = self.world.get_or_default(target);
-                damage_mut.0 += 1;
-                damage_mut.0
+                let target_damage: &mut Damage = self.world.get_or_default(target);
+                target_damage.0 += damage;
+                if target_damage.0 < 0 { target_damage.0 = 0; }
+                target_damage.0
             };
             if total_damage >= max_health {
                 self.kill_entity(target);
+            }
+        }
+    }
+
+    fn add_exhaustion(&mut self, target: Entity, exhaustion: i8) {
+        if let Some(&EntityClass::Actor { max_stamina, .. }) =
+            self.world.entity_ref(target).get::<EntityType>().map(|t| &t.data().class)
+        {
+            let excess_exhaustion = {
+                let target_exhaustion: &mut Exhaustion = self.world.get_or_default(target);
+                target_exhaustion.0 += exhaustion;
+                if target_exhaustion.0 < 0 { target_exhaustion.0 = 0; }
+                if target_exhaustion.0 >= max_stamina {
+                    let excess_exhaustion = target_exhaustion.0 - max_stamina;
+                    target_exhaustion.0 = max_stamina;
+                    Some(excess_exhaustion)
+                } else {
+                    None
+                }
+            };
+            if let Some(excess_exhaustion) = excess_exhaustion {
+                self.add_damage(target, excess_exhaustion);
+            }
+        }
+    }
+
+    fn add_hunger(&mut self, target: Entity, hunger: i16) {
+        if let Some(&EntityClass::Actor { max_satiation, .. }) =
+            self.world.entity_ref(target).get::<EntityType>().map(|t| &t.data().class)
+        {
+            let excess_hunger = {
+                let target_hunger: &mut Hunger = self.world.get_or_default(target);
+                target_hunger.0 += hunger;
+                if target_hunger.0 < 0 { target_hunger.0 = 0; }
+                if target_hunger.0 >= max_satiation {
+                    let excess_hunger = target_hunger.0 - max_satiation;
+                    target_hunger.0 = max_satiation;
+                    Some(excess_hunger)
+                } else {
+                    None
+                }
+            };
+            if let Some(excess_hunger) = excess_hunger {
+                self.add_exhaustion(target, ::std::cmp::min(excess_hunger, 127) as i8);
             }
         }
     }
@@ -201,6 +271,7 @@ impl Game {
         if let Some(corpse_type) = old_type {
             self.world.insert(id, CorpseType(corpse_type));
         }
+        self.world.entity_mut(id).remove::<AiState>();
     }
 
     // TODO: this is a temporary (for testing)
@@ -209,6 +280,8 @@ impl Game {
         self.next_id += 1;
         if t == EntityType::Player {
             self.world.insert(id, IsPlayer);
+        } else if t.data().is_actor() {
+            self.world.insert(id, AiState::Waiting);
         }
         self.world.insert(id, t);
         self.world.set_location(id, Location::Position(p));
@@ -255,10 +328,33 @@ impl Game {
             cell
         }
     }
+
+    pub fn player_status(&self) -> String {
+        let player = self.world.component_ids::<IsPlayer>().next();
+        if let Some(player) = player {
+            let player_ref = self.world.entity_ref(player);
+            if let Some(&EntityClass::Actor {
+                max_health, max_stamina, max_satiation, ..
+            }) = player_ref.get::<EntityType>().map(|d| &d.data().class)
+            {
+                let damage = player_ref.get::<Damage>().map(|d| d.0).unwrap_or(0);
+                let exhaustion = player_ref.get::<Exhaustion>().map(|e| e.0).unwrap_or(0);
+                let hunger = player_ref.get::<Hunger>().map(|h| h.0).unwrap_or(0);
+                return format!(
+                    " Health: {:2}/{} -- Stamina: {:2}/{} -- Satiation: {:3}/{} ",
+                    max_health - damage, max_health,
+                    max_stamina - exhaustion, max_stamina,
+                    max_satiation - hunger, max_satiation,
+                );
+            }
+        }
+        // TODO: Add final score or something?
+        format!(" Game over. Press 'N' to restart. ")
+    }
 }
 
 // TODO: this is temporary
-pub fn init_game(g: &mut Game) {
+fn init_game(g: &mut Game) {
     g.put_entity(EntityType::Player, Position { x: 3, y: 3 });
     g.put_entity(EntityType::Rock, Position { x: 3, y: 3 });
 

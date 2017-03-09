@@ -1,5 +1,5 @@
 use ::engine::*;
-use super::Color;
+use super::{Color, Entity};
 
 #[derive(Debug)]
 pub enum EntityClass {
@@ -98,3 +98,13 @@ entity_data! {
 pub struct CorpseType(pub EntityType);
 
 impl Component for CorpseType {}
+
+pub enum AiState {
+    Waiting,
+    Wandering(Position),
+    Fleeing(Position),
+    Searching(Position),
+    Hunting(Entity, Position),
+}
+
+impl Component for AiState {}
