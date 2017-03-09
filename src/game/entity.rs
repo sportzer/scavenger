@@ -3,7 +3,9 @@ use super::Color;
 
 #[derive(Debug)]
 pub enum EntityClass {
-    Item,
+    Item {
+        display_priority: i8,
+    },
     Actor {
         max_health: i8,
         max_stamina: i8,
@@ -21,7 +23,7 @@ pub struct EntityData {
 impl EntityData {
     pub fn is_item(&self) -> bool {
         match self.class {
-            EntityClass::Item => true,
+            EntityClass::Item { .. } => true,
             _ => false,
         }
     }
@@ -59,7 +61,17 @@ entity_data! {
         name: "rock",
         ch: ',',
         color: Some(Color::White),
-        class: EntityClass::Item,
+        class: EntityClass::Item {
+            display_priority: 10,
+        },
+    }
+    Corpse: {
+        name: "corpse",
+        ch: '%',
+        color: Some(Color::Red),
+        class: EntityClass::Item {
+            display_priority: 5,
+        },
     }
     Rat: {
         name: "rat",
@@ -82,3 +94,7 @@ entity_data! {
         },
     }
 }
+
+pub struct CorpseType(pub EntityType);
+
+impl Component for CorpseType {}

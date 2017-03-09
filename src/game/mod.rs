@@ -66,6 +66,7 @@ world! {
             Damage,
             Exhaustion,
             Hunger,
+            CorpseType,
         }
         Position: {
             Contents,
@@ -148,6 +149,8 @@ impl Game {
         }
 
         // TODO: creature actions
+
+        // TODO: per turn processing
     }
 
     fn move_entity(&mut self, id: Entity, dir: Direction) -> bool {
@@ -188,23 +191,16 @@ impl Game {
                 damage_mut.0
             };
             if total_damage >= max_health {
-                self.destroy_entity(target);
+                self.kill_entity(target);
             }
         }
     }
 
-    fn destroy_entity(&mut self, id: Entity) {
-        self.world.remove_location(id);
-
-        struct DestroyEntityVisitor<I: Id>(I);
-        impl<S: EntityStorage<I>, I: Id> VisitComponentTypesMut<S, I> for DestroyEntityVisitor<I> {
-            fn visit_mut<C: Component>(&mut self, s: &mut S)
-                where S: ComponentStorage<I, C>
-            {
-                s.remove(self.0);
-            }
+    fn kill_entity(&mut self, id: Entity) {
+        let old_type = self.world.insert(id, EntityType::Corpse);
+        if let Some(corpse_type) = old_type {
+            self.world.insert(id, CorpseType(corpse_type));
         }
-        self.world.visit_component_types_mut(&mut DestroyEntityVisitor(id));
     }
 
     // TODO: this is a temporary (for testing)
@@ -226,9 +222,14 @@ impl Game {
                 if let Some(entity_data) = self.world.entity_ref(e)
                     .get::<EntityType>().map(|t| t.data())
                 {
-                    if data.is_none() || entity_data.is_actor() {
-                        data = Some(entity_data);
-                    }
+                    data = match (data.map(|d| &d.class), &entity_data.class) {
+                        (Some(&EntityClass::Actor { .. }), _) => data,
+                        (
+                            Some(&EntityClass::Item { display_priority: old_priority, .. }),
+                            &EntityClass::Item { display_priority: new_priority, .. },
+                        ) if old_priority <= new_priority => data,
+                        _ => Some(entity_data),
+                    };
                 }
             }
         }
