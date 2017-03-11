@@ -1,4 +1,5 @@
 use std::collections::BTreeSet;
+use rand::{Rng, SeedableRng, StdRng};
 
 use ::engine::*;
 
@@ -11,6 +12,9 @@ use self::position::*;
 
 mod stats;
 use self::stats::*;
+
+mod fov;
+use self::fov::*;
 
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq, Ord, PartialOrd)]
 pub struct Entity(u64);
@@ -72,6 +76,8 @@ world! {
         Position: {
             Contents,
             Tile,
+            IsVisible,
+            WasVisible,
         }
     }
 }
@@ -126,22 +132,24 @@ impl GameWorld {
 pub struct Game {
     world: GameWorld,
     next_id: u64,
+    // TODO: this is total unserializable, I'll probably have to roll my own RNG
+    rand: StdRng,
 }
 
 impl Game {
-    pub fn new() -> Game {
+    pub fn new(seed: u64) -> Game {
         let mut g = Game {
             world: GameWorld::new(),
             next_id: 1,
+            rand: StdRng::from_seed(&[seed as usize]),
         };
         init_game(&mut g);
+        update_fov(&mut g);
         g
     }
 
     pub fn take_turn(&mut self, action: Action) {
-        // TODO: make sure there is at most one player?
-        let player = self.world.component_ids::<IsPlayer>().next();
-        if let Some(player) = player {
+        if let Some(player) = self.find_player() {
             match action {
                 Action::Wait => { /* TODO */ }
                 Action::Move(dir) => {
@@ -150,6 +158,7 @@ impl Game {
                 }
             }
         }
+        update_fov(self);
 
         // TODO: creature actions
         let creatures: Vec<Entity> = self.world.component_ids::<AiState>().collect();
@@ -159,6 +168,93 @@ impl Game {
         }
 
         // TODO: per turn processing
+
+        update_fov(self);
+    }
+
+    pub fn render(&self, p: Position) -> Cell {
+        let mut cell = Cell {
+            ch: ' ',
+            fg: Color::Black,
+            bg: Color::Black,
+            bold: false,
+        };
+
+        if let Some(&WasVisible(tile)) = self.world.get(p) {
+            cell = tile.render_memory();
+        }
+
+        if let Some(&IsVisible(dist)) = self.world.get(p) {
+            if dist <= self.player_view_distance() {
+                if let Some(tile) = self.world.entity_ref(p).get::<Tile>() {
+                    cell = tile.render();
+                }
+
+                let mut data: Option<&'static EntityData> = None;
+
+                if let Some(&Contents(ref entities)) = self.world.get(p) {
+                    for &e in entities {
+                        if let Some(entity_data) = self.world.entity_ref(e)
+                            .get::<EntityType>().map(|t| t.data())
+                        {
+                            data = match (data.map(|d| &d.class), &entity_data.class) {
+                                (Some(&EntityClass::Actor { .. }), _) => data,
+                                (
+                                    Some(&EntityClass::Item { display_priority: old_priority, .. }),
+                                    &EntityClass::Item { display_priority: new_priority, .. },
+                                ) if old_priority <= new_priority => data,
+                                _ => Some(entity_data),
+                            };
+                        }
+                    }
+                }
+
+                if let Some(d) = data {
+                    cell = Cell {
+                        ch: d.ch,
+                        fg: d.color.unwrap_or(cell.fg),
+                        bg: cell.bg,
+                        bold: d.is_actor(),
+                    }
+                }
+            }
+        }
+
+        cell
+    }
+
+    pub fn player_status(&self) -> String {
+        if let Some(player) = self.find_player() {
+            let player_ref = self.world.entity_ref(player);
+            if let Some(&EntityClass::Actor {
+                max_health, max_stamina, max_satiation, ..
+            }) = player_ref.get::<EntityType>().map(|d| &d.data().class)
+            {
+                let damage = player_ref.get::<Damage>().map(|d| d.0).unwrap_or(0);
+                let exhaustion = player_ref.get::<Exhaustion>().map(|e| e.0).unwrap_or(0);
+                let hunger = player_ref.get::<Hunger>().map(|h| h.0).unwrap_or(0);
+                return format!(
+                    " Health: {:2}/{} -- Stamina: {:2}/{} -- Satiation: {:3}/{} ",
+                    max_health - damage, max_health,
+                    max_stamina - exhaustion, max_stamina,
+                    max_satiation - hunger, max_satiation,
+                );
+            }
+        }
+        // TODO: Add final score or something?
+        format!(" Game over. Press 'N' to restart. ")
+    }
+}
+
+impl Game {
+    fn find_player(&self) -> Option<Entity> {
+        // TODO: make sure there is at most one player?
+        self.world.component_ids::<IsPlayer>().next()
+    }
+
+    fn player_view_distance(&self) -> i8 {
+        // TODO: dynamic view distance
+        5
     }
 
     fn move_entity(&mut self, id: Entity, dir: Direction) -> bool {
@@ -286,71 +382,6 @@ impl Game {
         self.world.insert(id, t);
         self.world.set_location(id, Location::Position(p));
     }
-
-    pub fn render(&self, p: Position) -> Cell {
-        let mut data: Option<&'static EntityData> = None;
-
-        if let Some(&Contents(ref entities)) = self.world.get(p) {
-            for &e in entities {
-                if let Some(entity_data) = self.world.entity_ref(e)
-                    .get::<EntityType>().map(|t| t.data())
-                {
-                    data = match (data.map(|d| &d.class), &entity_data.class) {
-                        (Some(&EntityClass::Actor { .. }), _) => data,
-                        (
-                            Some(&EntityClass::Item { display_priority: old_priority, .. }),
-                            &EntityClass::Item { display_priority: new_priority, .. },
-                        ) if old_priority <= new_priority => data,
-                        _ => Some(entity_data),
-                    };
-                }
-            }
-        }
-
-        let cell = self.world.entity_ref(p).get::<Tile>().map(Tile::render)
-            .unwrap_or(
-                Cell {
-                    ch: ' ',
-                    fg: Color::Black,
-                    bg: Color::Black,
-                    bold: false,
-                }
-            );
-
-        if let Some(d) = data {
-            Cell {
-                ch: d.ch,
-                fg: d.color.unwrap_or(cell.fg),
-                bg: cell.bg,
-                bold: d.is_actor(),
-            }
-        } else {
-            cell
-        }
-    }
-
-    pub fn player_status(&self) -> String {
-        let player = self.world.component_ids::<IsPlayer>().next();
-        if let Some(player) = player {
-            let player_ref = self.world.entity_ref(player);
-            if let Some(&EntityClass::Actor {
-                max_health, max_stamina, max_satiation, ..
-            }) = player_ref.get::<EntityType>().map(|d| &d.data().class)
-            {
-                let damage = player_ref.get::<Damage>().map(|d| d.0).unwrap_or(0);
-                let exhaustion = player_ref.get::<Exhaustion>().map(|e| e.0).unwrap_or(0);
-                let hunger = player_ref.get::<Hunger>().map(|h| h.0).unwrap_or(0);
-                return format!(
-                    " Health: {:2}/{} -- Stamina: {:2}/{} -- Satiation: {:3}/{} ",
-                    max_health - damage, max_health,
-                    max_stamina - exhaustion, max_stamina,
-                    max_satiation - hunger, max_satiation,
-                );
-            }
-        }
-        // TODO: Add final score or something?
-        format!(" Game over. Press 'N' to restart. ")
-    }
 }
 
 // TODO: this is temporary
@@ -366,12 +397,13 @@ fn init_game(g: &mut Game) {
 
     g.put_entity(EntityType::Rock, Position { x: 6, y: 4 });
 
-    for x in 0..9 {
+    for x in 0..17 {
         for y in 0..9 {
             let tile = if x%8 == 0 || y%8 == 0 { Tile::Wall } else { Tile::Ground };
             g.world.insert(Position{ x, y }, tile);
         }
     }
+    g.world.insert(Position{ x: 8, y: 5 }, Tile::Ground);
 
     g.world.insert(Position{ x: 6, y: 5 }, Tile::ShallowWater);
     g.world.insert(Position{ x: 7, y: 5 }, Tile::ShallowWater);
@@ -380,8 +412,7 @@ fn init_game(g: &mut Game) {
     g.world.insert(Position{ x: 6, y: 7 }, Tile::DeepWater);
     g.world.insert(Position{ x: 7, y: 7 }, Tile::DeepWater);
 
-    g.put_entity(EntityType::Rock, Position { x: 7, y: 5 });
-    g.put_entity(EntityType::Rock, Position { x: 7, y: 6 });
+    g.put_entity(EntityType::Rock, Position { x: 7, y: 4 });
 
     g.world.insert(Position{ x: 1, y: 4 }, Tile::ShortGrass);
     g.world.insert(Position{ x: 2, y: 4 }, Tile::ShortGrass);
@@ -392,4 +423,6 @@ fn init_game(g: &mut Game) {
     g.world.insert(Position{ x: 1, y: 6 }, Tile::LongGrass);
     g.world.insert(Position{ x: 2, y: 6 }, Tile::LongGrass);
     g.world.insert(Position{ x: 3, y: 6 }, Tile::LongGrass);
+
+    g.world.insert(Position{ x: g.rand.gen_range(1,8), y: 1 }, Tile::Tree);
 }

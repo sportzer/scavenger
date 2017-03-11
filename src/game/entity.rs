@@ -59,7 +59,7 @@ impl Component for EntityType {}
 entity_data! {
     Rock: {
         name: "rock",
-        ch: ',',
+        ch: '*',
         color: Some(Color::White),
         class: EntityClass::Item {
             display_priority: 10,

@@ -25,6 +25,12 @@ pub trait EntityStorage<I: Id>: World {
         self.ids()
     }
 
+    fn clear_component<C: Component>(&mut self)
+        where Self: ComponentStorage<I, C>
+    {
+        self.clear()
+    }
+
     fn entity_ref(&self, id: I) -> EntityRef<Self, I> where Self: Sized {
         EntityRef {
             world: self,

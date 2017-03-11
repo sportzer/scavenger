@@ -9,6 +9,7 @@ pub enum Tile {
     DeepWater,
     ShortGrass,
     LongGrass,
+    Tree,
 }
 
 impl Component for Tile {}
@@ -52,10 +53,40 @@ impl Tile {
                 bg: Color::Black,
                 bold: false,
             },
+            &Tile::Tree => Cell {
+                ch: '#',
+                fg: Color::Green,
+                bg: Color::Black,
+                bold: false,
+            },
+        }
+    }
+
+    pub fn render_memory(&self) -> Cell {
+        let cell = self.render();
+        if cell.bg == Color::Black {
+            Cell {
+                ch: cell.ch,
+                fg: Color::White,
+                bg: Color::Black,
+                bold: false,
+            }
+        } else {
+            Cell {
+                ch: cell.ch,
+                fg: Color::Black,
+                bg: Color::White,
+                bold: false,
+            }
         }
     }
 
     pub fn is_walkable(&self) -> bool {
-        self != &Tile::Wall && self != &Tile::DeepWater
+        // TODO: account for swimming and flying critters
+        self != &Tile::Wall && self != &Tile::DeepWater && self != &Tile::Tree
+    }
+
+    pub fn is_obstructed(&self) -> bool {
+        self == &Tile::Wall || self == &Tile::Tree
     }
 }

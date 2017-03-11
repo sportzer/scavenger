@@ -2,8 +2,10 @@
 #![allow(dead_code)]  // TODO: remove me
 
 extern crate pancurses;
+extern crate rand;
 
 use pancurses::{Input, Window};
+use rand::Rng;
 
 #[macro_use]
 mod engine;
@@ -14,7 +16,7 @@ use game::*;
 
 
 fn main() {
-    let mut g = Game::new();
+    let mut g = Game::new(rand::thread_rng().gen());
 
     let window = pancurses::initscr();
     window.keypad(true);
@@ -112,15 +114,16 @@ fn main() {
             match key {
                 None => {}
                 Some(Input::Character(c)) => { match c {
-                    'q' | 'Q' => { break; }
+                    'Q' => { break; }
                     '\x1b' => {
                         // handle ESC, but ignore things like Alt+key
                         window.nodelay(true);
+                        // TODO: should probably have a menu here
                         if window.getch().is_none() { break; }
                         while window.getch().is_some() {}
                         window.nodelay(false);
                     }
-                    'N' => { g = Game::new(); }
+                    'N' => { g = Game::new(rand::thread_rng().gen()); }
                     _ => {}
                 }}
                 _ => {}
