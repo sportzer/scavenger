@@ -225,11 +225,11 @@ impl<'a, S: EntityStorage<I> + 'a, I: Id> EntityRef<'a, S, I> {
         self.world.has_component::<C>(self.id)
     }
 
-    pub fn get<C: Component>(&self) -> Option<&C> where S: ComponentStorage<I, C> {
+    pub fn get<C: Component>(&self) -> Option<&'a C> where S: ComponentStorage<I, C> {
         self.world.get(self.id)
     }
 
-    pub fn get_ref<C: Component>(&self) -> Option<ComponentRef<S, I, C>> where S: ComponentStorage<I, C> {
+    pub fn get_ref<C: Component>(&self) -> Option<ComponentRef<'a, S, I, C>> where S: ComponentStorage<I, C> {
         self.world.get(self.id).map(|c| ComponentRef {
             world: self.world,
             component: c,
@@ -241,7 +241,7 @@ impl<'a, S: EntityStorage<I> + 'a, I: Id> EntityRef<'a, S, I> {
         self.id
     }
 
-    pub fn world(&self) -> &S {
+    pub fn world(&self) -> &'a S {
         &self.world
     }
 }
@@ -316,11 +316,11 @@ impl<'a, I: Id, C: Component + 'a, S: ComponentStorage<I, C> + 'a> ComponentRef<
         self.id
     }
 
-    pub fn world(&self) -> &S {
+    pub fn world(&self) -> &'a S {
         &self.world
     }
 
-    pub fn as_entity_ref(&self) -> EntityRef<S, I> {
+    pub fn as_entity_ref(&self) -> EntityRef<'a, S, I> {
         EntityRef {
             world: self.world,
             id: self.id,

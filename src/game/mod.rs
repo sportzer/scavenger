@@ -16,6 +16,8 @@ use self::stats::*;
 mod fov;
 use self::fov::*;
 
+mod map;
+
 #[derive(Debug, Copy, Clone, Hash, Eq, PartialEq, Ord, PartialOrd)]
 pub struct Entity(u64);
 
@@ -143,7 +145,7 @@ impl Game {
             next_id: 1,
             rand: StdRng::from_seed(&[seed as usize]),
         };
-        init_game(&mut g);
+        map::init_game(&mut g);
         update_fov(&mut g);
         g
     }
@@ -185,7 +187,7 @@ impl Game {
         }
 
         if let Some(&IsVisible(dist)) = self.world.get(pos) {
-            if dist <= self.player_view_distance() {
+            if dist <= self.player_fov_range() {
                 cell = self.get_tile(pos).render();
 
                 let mut data: Option<&'static EntityData> = None;
@@ -250,9 +252,17 @@ impl Game {
         self.world.component_ids::<IsPlayer>().next()
     }
 
-    fn player_view_distance(&self) -> i8 {
+    fn player_fov_range(&self) -> i8 {
         // TODO: dynamic view distance
-        4
+        if let Some(&EntityClass::Actor { fov_range, .. }) =
+            self.find_player()
+            .and_then(|id| self.world.entity_ref(id).get::<EntityType>())
+            .map(|t| &t.data().class)
+        {
+            fov_range
+        } else {
+            0
+        }
     }
 
     fn get_tile(&self, pos: Position) -> Tile {
@@ -382,45 +392,4 @@ impl Game {
         self.world.insert(id, t);
         self.world.set_location(id, Location::Position(p));
     }
-}
-
-// TODO: this is temporary
-fn init_game(g: &mut Game) {
-    g.put_entity(EntityType::Player, Position { x: 3, y: 3 });
-    g.put_entity(EntityType::Rock, Position { x: 3, y: 3 });
-
-    g.put_entity(EntityType::Rat, Position { x: 5, y: 3 });
-
-    g.put_entity(EntityType::Rock, Position { x: 4, y: 4 });
-    g.put_entity(EntityType::Rat, Position { x: 4, y: 4 });
-
-    for x in 0..14 {
-        for y in 0..9 {
-            let tile = if x%8 == 0 || y%8 == 0 { Tile::Wall } else { Tile::Ground };
-            g.world.insert(Position{ x, y }, tile);
-        }
-    }
-    g.world.insert(Position{ x: 8, y: 4 }, Tile::Ground);
-
-    g.world.insert(Position{ x: 6, y: 5 }, Tile::ShallowWater);
-    g.world.insert(Position{ x: 7, y: 5 }, Tile::ShallowWater);
-    g.world.insert(Position{ x: 6, y: 6 }, Tile::ShallowWater);
-    g.world.insert(Position{ x: 7, y: 6 }, Tile::DeepWater);
-    g.world.insert(Position{ x: 6, y: 7 }, Tile::DeepWater);
-    g.world.insert(Position{ x: 7, y: 7 }, Tile::DeepWater);
-
-    g.put_entity(EntityType::Rock, Position { x: 7, y: 5 });
-    g.put_entity(EntityType::Rock, Position { x: 7, y: 6 });
-
-    g.world.insert(Position{ x: 1, y: 4 }, Tile::ShortGrass);
-    g.world.insert(Position{ x: 2, y: 4 }, Tile::ShortGrass);
-    g.world.insert(Position{ x: 3, y: 4 }, Tile::ShortGrass);
-    g.world.insert(Position{ x: 1, y: 5 }, Tile::LongGrass);
-    g.world.insert(Position{ x: 2, y: 5 }, Tile::LongGrass);
-    g.world.insert(Position{ x: 3, y: 5 }, Tile::LongGrass);
-    g.world.insert(Position{ x: 1, y: 6 }, Tile::LongGrass);
-    g.world.insert(Position{ x: 2, y: 6 }, Tile::LongGrass);
-    g.world.insert(Position{ x: 3, y: 6 }, Tile::LongGrass);
-
-    g.world.insert(Position{ x: g.rand.gen_range(1,8), y: 1 }, Tile::Tree);
 }

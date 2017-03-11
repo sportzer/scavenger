@@ -12,7 +12,7 @@ pub fn update_fov(game: &mut Game) {
 
     if let Some(player) = game.find_player() {
         if let Some(&Location::Position(pos)) = game.world.get(player) {
-            let view_distance = game.player_view_distance();
+            let view_distance = game.player_fov_range();
 
             insert(game, pos, 0, view_distance);
             for quadrant in 0..4 {

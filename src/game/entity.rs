@@ -10,6 +10,7 @@ pub enum EntityClass {
         max_health: i8,
         max_stamina: i8,
         max_satiation: i16,
+        fov_range: i8,
     },
 }
 
@@ -81,6 +82,7 @@ entity_data! {
             max_health: 2,
             max_stamina: 2,
             max_satiation: 20,
+            fov_range: 2,
         },
     }
     Player: {
@@ -91,6 +93,7 @@ entity_data! {
             max_health: 10,
             max_stamina: 10,
             max_satiation: 100,
+            fov_range: 4,
         },
     }
 }
