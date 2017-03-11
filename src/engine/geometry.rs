@@ -50,6 +50,13 @@ impl Direction {
             Direction::NorthWest => Direction::SouthEast,
         }
     }
+
+    pub fn is_orthogonal(&self) -> bool {
+        self == &Direction::North
+        || self == &Direction::East
+        || self == &Direction::South
+        || self == &Direction::West
+    }
 }
 
 // deriving Ord here is probably the wrong thing to do, but whatever,

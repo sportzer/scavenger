@@ -131,6 +131,33 @@ impl GameWorld {
     }
 }
 
+pub struct Rect {
+    pub min_x: i32,
+    pub max_x: i32,
+    pub min_y: i32,
+    pub max_y: i32,
+}
+
+impl Rect {
+    fn extend(&mut self, pos: Position) {
+        self.min_x = ::std::cmp::min(self.min_x, pos.x);
+        self.max_x = ::std::cmp::max(self.max_x, pos.x);
+        self.min_y = ::std::cmp::min(self.min_y, pos.y);
+        self.max_y = ::std::cmp::max(self.max_y, pos.y);
+    }
+}
+
+impl From<Position> for Rect {
+    fn from(pos: Position) -> Rect {
+        Rect {
+            min_x: pos.x,
+            max_x: pos.x,
+            min_y: pos.y,
+            max_y: pos.y,
+        }
+    }
+}
+
 pub struct Game {
     world: GameWorld,
     next_id: u64,
@@ -243,6 +270,31 @@ impl Game {
         }
         // TODO: Add final score or something?
         format!(" Game over. Press 'N' to restart. ")
+    }
+
+    pub fn player_position(&self) -> Option<Position> {
+        if let Some(&Location::Position(pos)) =
+            self.find_player().and_then(|id| self.world.get(id))
+        {
+            Some(pos)
+        } else {
+            None
+        }
+    }
+
+    pub fn fov_bounding_rect(&self) -> Option<Rect> {
+        if let Some(pos) = self.player_position() {
+            let fov_range = self.player_fov_range();
+            let mut rect = Rect::from(pos);
+            for (pos, &IsVisible(dist)) in self.world.iter() {
+                if dist <= fov_range {
+                    rect.extend(pos);
+                }
+            }
+            Some(rect)
+        } else {
+            None
+        }
     }
 }
 
