@@ -172,7 +172,7 @@ impl Game {
         update_fov(self);
     }
 
-    pub fn render(&self, p: Position) -> Cell {
+    pub fn render(&self, pos: Position) -> Cell {
         let mut cell = Cell {
             ch: ' ',
             fg: Color::Black,
@@ -180,19 +180,17 @@ impl Game {
             bold: false,
         };
 
-        if let Some(&WasVisible(tile)) = self.world.get(p) {
+        if let Some(&WasVisible(tile)) = self.world.get(pos) {
             cell = tile.render_memory();
         }
 
-        if let Some(&IsVisible(dist)) = self.world.get(p) {
+        if let Some(&IsVisible(dist)) = self.world.get(pos) {
             if dist <= self.player_view_distance() {
-                if let Some(tile) = self.world.entity_ref(p).get::<Tile>() {
-                    cell = tile.render();
-                }
+                cell = self.get_tile(pos).render();
 
                 let mut data: Option<&'static EntityData> = None;
 
-                if let Some(&Contents(ref entities)) = self.world.get(p) {
+                if let Some(&Contents(ref entities)) = self.world.get(pos) {
                     for &e in entities {
                         if let Some(entity_data) = self.world.entity_ref(e)
                             .get::<EntityType>().map(|t| t.data())
@@ -254,16 +252,18 @@ impl Game {
 
     fn player_view_distance(&self) -> i8 {
         // TODO: dynamic view distance
-        5
+        4
+    }
+
+    fn get_tile(&self, pos: Position) -> Tile {
+        *self.world.entity_ref(pos).get::<Tile>().unwrap_or(&Tile::Wall)
     }
 
     fn move_entity(&mut self, id: Entity, dir: Direction) -> bool {
         let location: Option<Location> = self.world.get(id).map(|&l| l);
         if let Some(Location::Position(pos)) = location {
             let new_pos = pos.step(dir);
-            if self.world.entity_ref(new_pos).get::<Tile>()
-                .map(Tile::is_walkable).unwrap_or(false)
-            {
+            if self.get_tile(new_pos).is_walkable() {
                 // TODO: make sure there is only one valid target in location?
                 let target = self.world.entity_ref(new_pos).get::<Contents>()
                     .and_then(|contents|
@@ -390,20 +390,17 @@ fn init_game(g: &mut Game) {
     g.put_entity(EntityType::Rock, Position { x: 3, y: 3 });
 
     g.put_entity(EntityType::Rat, Position { x: 5, y: 3 });
-    g.put_entity(EntityType::Rock, Position { x: 5, y: 3 });
 
     g.put_entity(EntityType::Rock, Position { x: 4, y: 4 });
     g.put_entity(EntityType::Rat, Position { x: 4, y: 4 });
 
-    g.put_entity(EntityType::Rock, Position { x: 6, y: 4 });
-
-    for x in 0..17 {
+    for x in 0..14 {
         for y in 0..9 {
             let tile = if x%8 == 0 || y%8 == 0 { Tile::Wall } else { Tile::Ground };
             g.world.insert(Position{ x, y }, tile);
         }
     }
-    g.world.insert(Position{ x: 8, y: 5 }, Tile::Ground);
+    g.world.insert(Position{ x: 8, y: 4 }, Tile::Ground);
 
     g.world.insert(Position{ x: 6, y: 5 }, Tile::ShallowWater);
     g.world.insert(Position{ x: 7, y: 5 }, Tile::ShallowWater);
@@ -412,7 +409,8 @@ fn init_game(g: &mut Game) {
     g.world.insert(Position{ x: 6, y: 7 }, Tile::DeepWater);
     g.world.insert(Position{ x: 7, y: 7 }, Tile::DeepWater);
 
-    g.put_entity(EntityType::Rock, Position { x: 7, y: 4 });
+    g.put_entity(EntityType::Rock, Position { x: 7, y: 5 });
+    g.put_entity(EntityType::Rock, Position { x: 7, y: 6 });
 
     g.world.insert(Position{ x: 1, y: 4 }, Tile::ShortGrass);
     g.world.insert(Position{ x: 2, y: 4 }, Tile::ShortGrass);

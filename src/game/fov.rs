@@ -76,7 +76,7 @@ pub fn update_fov(game: &mut Game) {
 }
 
 fn is_obstructed(game: &Game, pos: Position) -> bool {
-    game.world.entity_ref(pos).get::<Tile>().map(|t| t.is_obstructed()).unwrap_or(true)
+    game.get_tile(pos).is_obstructed()
 }
 
 fn not_obstructed(game: &Game, pos: Position) -> bool {
@@ -92,10 +92,9 @@ fn add_offset(pos: Position, x: i32, y: i32) -> Position {
 }
 
 fn insert(game: &mut Game, pos: Position, distance: i8, view_distance: i8) {
-    if let Some(&tile) = game.world.entity_ref(pos).get::<Tile>() {
-        if view_distance >= distance {
-            game.world.insert(pos, WasVisible(tile));
-        }
-        game.world.insert(pos, IsVisible(distance));
+    if view_distance >= distance {
+        let tile = game.get_tile(pos);
+        game.world.insert(pos, WasVisible(tile));
     }
+    game.world.insert(pos, IsVisible(distance));
 }
