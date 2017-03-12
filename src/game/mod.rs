@@ -189,11 +189,14 @@ impl Game {
         }
         update_fov(self);
 
-        // TODO: creature actions
         let creatures: Vec<Entity> = self.world.component_ids::<AiState>().collect();
         for id in creatures {
-            // TODO: add real AI
-            self.move_entity(id, Direction::West);
+            if let Some(state) = self.world.entity_ref(id).get::<AiState>().cloned() {
+                let new_state = state.take_turn(self, id);
+                if let Some(state_mut) = self.world.entity_mut(id).get_mut::<AiState>() {
+                    *state_mut = new_state;
+                }
+            }
         }
 
         // TODO: per turn processing
@@ -337,7 +340,7 @@ impl Game {
                          })
                     ).map(|&id| id);
                 if let Some(target) = target {
-                    self.attack(id, target);
+                    return self.attack(id, target);
                 } else {
                     self.world.set_location(id, Location::Position(new_pos));
                 }
@@ -347,13 +350,14 @@ impl Game {
         false
     }
 
-    fn attack(&mut self, attacker: Entity, target: Entity) {
+    fn attack(&mut self, attacker: Entity, target: Entity) -> bool {
         // TODO: figure out whether I want these checks or not
-        if !self.is_actor(attacker) || !self.is_actor(target) { return; }
-        if self.is_player(attacker) == self.is_player(target) { return; }
+        if !self.is_actor(attacker) || !self.is_actor(target) { return false; }
+        if self.is_player(attacker) == self.is_player(target) { return false; }
 
         // TODO: make this less bad
         self.add_damage(target, 1);
+        true
     }
 
     fn is_player(&self, id: Entity) -> bool {

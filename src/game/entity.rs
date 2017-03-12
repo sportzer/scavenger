@@ -1,7 +1,6 @@
 use ::engine::*;
-use super::{Color, Entity};
+use super::*;
 
-#[derive(Debug)]
 pub enum EntityClass {
     Item {
         display_priority: i8,
@@ -11,6 +10,7 @@ pub enum EntityClass {
         max_stamina: i8,
         max_satiation: i16,
         fov_range: i8,
+        ai: Option<Ai>,
     },
 }
 
@@ -57,6 +57,11 @@ macro_rules! entity_data {
 
 impl Component for EntityType {}
 
+struct Ai {
+    attack: bool,
+    flee: bool,
+}
+
 entity_data! {
     Rock: {
         name: "rock",
@@ -82,7 +87,26 @@ entity_data! {
             max_health: 2,
             max_stamina: 2,
             max_satiation: 20,
-            fov_range: 2,
+            fov_range: 3,
+            ai: Some(Ai {
+                attack: true,
+                flee: true,
+            }),
+        },
+    }
+    Deer: {
+        name: "deer",
+        ch: 'd',
+        color: Some(Color::Yellow),
+        class: EntityClass::Actor {
+            max_health: 5,
+            max_stamina: 5,
+            max_satiation: 40,
+            fov_range: 4,
+            ai: Some(Ai {
+                attack: false,
+                flee: true,
+            }),
         },
     }
     Player: {
@@ -94,6 +118,7 @@ entity_data! {
             max_stamina: 10,
             max_satiation: 100,
             fov_range: 4,
+            ai: None,
         },
     }
 }
@@ -102,12 +127,123 @@ pub struct CorpseType(pub EntityType);
 
 impl Component for CorpseType {}
 
+#[derive(Copy, Clone)]
 pub enum AiState {
     Waiting,
     Wandering(Position),
-    Fleeing(Position),
-    Searching(Position),
+    Fleeing(Entity, Position),
     Hunting(Entity, Position),
 }
 
 impl Component for AiState {}
+
+fn step_towards(g: &mut Game, actor: Entity, pos: Position) -> Position {
+    let actor_pos: Option<Location> = g.world.get(actor).cloned();
+    if let Some(Location::Position(actor_pos)) = actor_pos {
+        if actor_pos != pos {
+            let x_offset = pos.x - actor_pos.x;
+            let y_offset = pos.y - actor_pos.y;
+            let abs_x_offset = x_offset.abs();
+            let abs_y_offset = y_offset.abs();
+            if abs_y_offset >= abs_x_offset {
+                if g.rand.gen_range(0, abs_y_offset) >= abs_x_offset {
+                    return Position { x: actor_pos.x, y: actor_pos.y + y_offset.signum() };
+                }
+            } else {
+                if g.rand.gen_range(0, abs_x_offset) >= abs_y_offset {
+                    return Position { x: actor_pos.x + x_offset.signum(), y: actor_pos.y };
+                }
+            }
+            return Position { x: actor_pos.x + x_offset.signum(), y: actor_pos.y + y_offset.signum() };
+        }
+    }
+    pos
+}
+
+// TODO: dedup with Game::move_entity
+fn move_towards(g: &mut Game, actor: Entity, pos: Position) -> bool {
+    let actor_pos: Option<Location> = g.world.get(actor).cloned();
+    let new_pos = step_towards(g, actor, pos);
+    if actor_pos == Some(Location::Position(new_pos)) { return false; }
+    if g.get_tile(new_pos).is_walkable() {
+        let target = g.world.entity_ref(new_pos).get::<Contents>()
+            .and_then(|contents|
+                      contents.0.iter().find(|&&id| {
+                          g.world.entity_ref(id).get::<EntityType>().map(
+                              |t| t.data().is_actor()
+                          ).unwrap_or(false)
+                      })
+            ).map(|&id| id);
+        if target.is_none() {
+            g.world.set_location(actor, Location::Position(new_pos));
+            return true;
+        }
+    }
+    false
+}
+
+impl AiState {
+    pub fn take_turn(mut self, g: &mut Game, actor: Entity) -> AiState {
+        let actor_type: Option<EntityType> = g.world.get(actor).cloned();
+        let actor_pos: Option<Location> = g.world.get(actor).cloned();
+        if let (Some(actor_type), Some(Location::Position(actor_pos))) = (actor_type, actor_pos) {
+            if let &EntityClass::Actor { fov_range, ai: Some(ref ai), .. } = &actor_type.data().class {
+                let player = (|| {
+                    let distance = g.world.entity_ref(actor_pos).get::<IsVisible>().map(|v| v.0);
+                    if distance.map(|d| d <= fov_range).unwrap_or(false) {
+                        if let Some(player_id) = g.find_player() {
+                            if let Some(Location::Position(player_pos)) = g.world.get(player_id).cloned() {
+                                return Some((player_id, player_pos));
+                            }
+                        }
+                    }
+                    None
+                }) ();
+
+                match self {
+                    AiState::Waiting => {}
+                    AiState::Wandering(pos) => {
+                        let moved = move_towards(g, actor, pos);
+                        if !moved {
+                            self = AiState::Waiting;
+                        }
+                    }
+                    AiState::Fleeing(id, pos) => {
+                        let moved = move_towards(g, actor, Position {
+                            x: actor_pos.x*2 - pos.x,
+                            y: actor_pos.y*2 - pos.y,
+                        });
+                        if !moved {
+                            self = AiState::Waiting;
+                        } else {
+                            if let Some((player_id, player_pos)) = player {
+                                if player_id == id {
+                                    return AiState::Fleeing(id, player_pos);
+                                }
+                            }
+                            // TODO: stop fleeing eventually
+                            return self;
+                        }
+                    }
+                    AiState::Hunting(id, pos) => {
+                        // TODO: if next to player, attack
+                        let moved = move_towards(g, actor, pos);
+                    }
+                }
+
+                if let Some((player_id, player_pos)) = player {
+                    if ai.attack {
+                        return AiState::Hunting(player_id, player_pos);
+                    } else if ai.flee {
+                        return AiState::Fleeing(player_id, player_pos);
+                    }
+                }
+
+                // TODO: Wander, especially if waiting
+
+                // TODO: herding / pack behavior?
+            }
+        }
+        self
+    }
+}

@@ -322,11 +322,13 @@ pub fn init_game(g: &mut Game) {
     place_player(g);
 
     // TODO: add creatures and items and hero corpses (skeletons?)
-    g.put_entity(EntityType::Rock, Position { x: 3, y: 3 });
+    // g.put_entity(EntityType::Rock, Position { x: 3, y: 3 });
     g.put_entity(EntityType::Rat, Position { x: 5, y: 3 });
-    g.put_entity(EntityType::Rock, Position { x: 4, y: 4 });
+    // g.put_entity(EntityType::Rock, Position { x: 4, y: 4 });
     g.put_entity(EntityType::Rat, Position { x: 4, y: 4 });
 
-    g.put_entity(EntityType::Rock, Position { x: 7, y: 5 });
-    g.put_entity(EntityType::Rock, Position { x: 7, y: 6 });
+    g.put_entity(EntityType::Deer, Position { x: 7, y: 7 });
+
+    // g.put_entity(EntityType::Rock, Position { x: 7, y: 5 });
+    // g.put_entity(EntityType::Rock, Position { x: 7, y: 6 });
 }
