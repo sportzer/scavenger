@@ -19,6 +19,12 @@ pub trait EntityStorage<I: Id>: World {
         self.has(id)
     }
 
+    fn component_count<'a, C: Component>(&'a self) -> usize
+        where Self: ComponentStorage<I, C>
+    {
+        self.count()
+    }
+
     fn component_ids<'a, C: Component>(&'a self) -> Box<Iterator<Item=I> + 'a>
         where Self: ComponentStorage<I, C>
     {
@@ -59,6 +65,7 @@ pub trait ComponentStorage<I: Id, C: Component>: EntityStorage<I> {
         self.get_or_else(id, Default::default)
     }
 
+    fn count(&self) -> usize;
     fn ids<'a>(&'a self) -> Box<Iterator<Item=I> + 'a>;
     fn iter<'a>(&'a self) -> Box<Iterator<Item=(I, &C)> + 'a>;
     fn iter_mut<'a>(&'a mut self) -> Box<Iterator<Item=(I, &mut C)> + 'a>;
@@ -183,6 +190,12 @@ macro_rules! world {
                         let storage: &mut ::std::collections::BTreeMap<$id, $component> =
                             $crate::engine::hlist::Get::get_mut(&mut self.0);
                         storage.entry(id).or_insert_with(f)
+                    }
+
+                    fn count(&self) -> usize {
+                        let storage: &::std::collections::BTreeMap<$id, $component> =
+                            $crate::engine::hlist::Get::get(&self.0);
+                        storage.len()
                     }
 
                     fn ids<'a>(&'a self) -> Box<Iterator<Item=$id> + 'a> {

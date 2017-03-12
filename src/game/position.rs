@@ -4,6 +4,7 @@ use super::{Color, Cell};
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub enum Tile {
     Wall,
+    BoringGround,  // indicates tile is unclaimed by map feature generation
     Ground,
     ShallowWater,
     DeepWater,
@@ -15,45 +16,51 @@ pub enum Tile {
 impl Component for Tile {}
 
 impl Tile {
-    pub fn render(&self) -> Cell {
+    pub fn render(self) -> Cell {
         match self {
-            &Tile::Wall => Cell {
+            Tile::Wall => Cell {
                 ch: '#',
                 fg: Color::Black,
                 bg: Color::Yellow,
                 bold: false,
             },
-            &Tile::Ground => Cell {
+            Tile::BoringGround => Cell {
                 ch: '.',
                 fg: Color::Yellow,
                 bg: Color::Black,
                 bold: false,
             },
-            &Tile::ShallowWater => Cell {
+            Tile::Ground => Cell {
+                ch: '.',
+                fg: Color::Yellow,
+                bg: Color::Black,
+                bold: false,
+            },
+            Tile::ShallowWater => Cell {
                 ch: '=',
                 fg: Color::Cyan,
                 bg: Color::Black,
                 bold: false,
             },
-            &Tile::DeepWater => Cell {
+            Tile::DeepWater => Cell {
                 ch: '=',
                 fg: Color::Cyan,
                 bg: Color::Blue,
                 bold: false,
             },
-            &Tile::ShortGrass => Cell {
+            Tile::ShortGrass => Cell {
                 ch: '.',
                 fg: Color::Green,
                 bg: Color::Black,
                 bold: false,
             },
-            &Tile::LongGrass => Cell {
+            Tile::LongGrass => Cell {
                 ch: '"',
                 fg: Color::Green,
                 bg: Color::Black,
                 bold: false,
             },
-            &Tile::Tree => Cell {
+            Tile::Tree => Cell {
                 ch: '#',
                 fg: Color::Green,
                 bg: Color::Black,
@@ -62,7 +69,7 @@ impl Tile {
         }
     }
 
-    pub fn render_memory(&self) -> Cell {
+    pub fn render_memory(self) -> Cell {
         let cell = self.render();
         if cell.bg == Color::Black {
             Cell {
@@ -81,12 +88,12 @@ impl Tile {
         }
     }
 
-    pub fn is_walkable(&self) -> bool {
+    pub fn is_walkable(self) -> bool {
         // TODO: account for swimming and flying critters
-        self != &Tile::Wall && self != &Tile::DeepWater && self != &Tile::Tree
+        self != Tile::Wall && self != Tile::DeepWater && self != Tile::Tree
     }
 
-    pub fn is_obstructed(&self) -> bool {
-        self == &Tile::Wall || self == &Tile::Tree
+    pub fn is_obstructed(self) -> bool {
+        self == Tile::Wall || self == Tile::Tree
     }
 }

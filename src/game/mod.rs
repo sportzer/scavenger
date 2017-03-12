@@ -213,8 +213,9 @@ impl Game {
             cell = tile.render_memory();
         }
 
-        if let Some(&IsVisible(dist)) = self.world.get(pos) {
-            if dist <= self.player_fov_range() {
+        // TODO: reenable FOV
+        // if let Some(&IsVisible(dist)) = self.world.get(pos) {
+        //     if dist <= self.player_fov_range() {
                 cell = self.get_tile(pos).render();
 
                 let mut data: Option<&'static EntityData> = None;
@@ -244,8 +245,8 @@ impl Game {
                         bold: d.is_actor(),
                     }
                 }
-            }
-        }
+        //     }
+        // }
 
         cell
     }
