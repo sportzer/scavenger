@@ -47,28 +47,66 @@ fn main() {
             window.erase();
             let (max_y, max_x) = window.get_max_yx();
 
+            let padding = 7;
             let old_center = display_center;
             if let Some(fov_rect) = g.fov_bounding_rect() {
-                if fov_rect.max_x - fov_rect.min_x + 3 > max_x {
+                if fov_rect.max_x - fov_rect.min_x + 1 + padding*2 > max_x {
                     display_center.x = (fov_rect.max_x + fov_rect.min_x) / 2;
                 } else {
-                    display_center.x = ::std::cmp::max(display_center.x + (max_x - max_x/2), fov_rect.max_x + 2) - (max_x - max_x/2);
-                    display_center.x = ::std::cmp::min(display_center.x - max_x/2, fov_rect.min_x - 1) + max_x/2;
+                    display_center.x = ::std::cmp::max(display_center.x + (max_x - max_x/2), fov_rect.max_x + 1 + padding) - (max_x - max_x/2);
+                    display_center.x = ::std::cmp::min(display_center.x - max_x/2, fov_rect.min_x - padding) + max_x/2;
                 }
-                if fov_rect.max_y - fov_rect.min_y + 3 > max_y {
-                    display_center.y = (fov_rect.max_y + fov_rect.min_y) / 2;
+                if fov_rect.max_y - fov_rect.min_y + 1 + padding*2 > max_y {
+                    display_center.y = (fov_rect.max_y + fov_rect.min_y) / 2 + 1;
                 } else {
-                    display_center.y = ::std::cmp::max(display_center.y + (max_y - max_y/2), fov_rect.max_y + 3) - (max_y - max_y/2);
-                    display_center.y = ::std::cmp::min(display_center.y - max_y/2, fov_rect.min_y - 1) + max_y/2;
+                    display_center.y = ::std::cmp::max(display_center.y + (max_y - max_y/2), fov_rect.max_y + 2 + padding) - (max_y - max_y/2);
+                    display_center.y = ::std::cmp::min(display_center.y - max_y/2, fov_rect.min_y - padding) + max_y/2;
                 }
             }
             if old_center != display_center { window.clear(); }
 
-            window.color_set(4+4*8+1);
-            window.mv(0, 0);
-            window.hline('-', max_x);
-            window.color_set(3+4*8+1);
-            window.mvaddstr(0, 0, &g.player_status());
+            window.attrset(pancurses::A_BOLD);
+            if let Some(status) = g.player_status() {
+                if status.recall_turns == Some(0) {
+                    window.mvaddstr(0, 0, &format!(
+                        " You escaped with {} diamonds! Press 'N' to restart.",
+                        status.diamonds,
+                    ));
+                } else if status.health > 0 {
+                    window.mvaddstr(0, 1, &format!(
+                        "Health: {:2}/{:2}",
+                        status.health,
+                        status.max_health,
+                    ));
+                    let render_item = |t: EntityType, x, bold| put_cell(
+                        &window, 0, x,
+                        Cell {
+                            ch: t.data().ch,
+                            fg: t.data().color.unwrap_or(Color::White),
+                            bg: Color::Black,
+                            bold,
+                        }
+                    );
+                    render_item(EntityType::Scroll, 18, status.recall_turns.is_none());
+                    render_item(EntityType::Sword, 18+5, status.has_sword);
+                    render_item(EntityType::Bow, 20+5, status.has_bow);
+                    let render_count = |t: EntityType, x, count| {
+                        window.attrset(if count > 0 { pancurses::A_BOLD } else { pancurses::A_NORMAL });
+                        window.mvaddstr(0, x, &format!("$: {:2}", count));
+                        render_item(t, x, count > 0);
+                    };
+                    render_count(EntityType::Arrow, 25+5, status.arrows);
+                    render_count(EntityType::Rock, 34+5, status.rocks);
+                    render_count(EntityType::Corpse, 43+5, status.corpses);
+                    render_count(EntityType::Herb, 52+5, status.herbs);
+                    render_count(EntityType::Diamond, 61+5, status.diamonds);
+                } else {
+                    window.mvaddstr(0, 0, &format!(
+                        " You died carrying {} diamonds. Press 'N' to restart.",
+                        status.diamonds,
+                    ));
+                }
+            }
 
             let (x_offset, y_offset) =
                 (display_center.x - max_x/2, display_center.y - max_y/2);

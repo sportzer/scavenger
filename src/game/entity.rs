@@ -1,4 +1,3 @@
-use ::engine::*;
 use super::*;
 
 pub enum EntityClass {
@@ -10,8 +9,15 @@ pub enum EntityClass {
         max_stamina: i8,
         max_satiation: i16,
         fov_range: i8,
+        damage: i8,
         ai: Option<Ai>,
     },
+}
+
+pub struct Ai {
+    attack: bool,
+    flee: bool,
+    wanders: bool
 }
 
 pub struct EntityData {
@@ -57,28 +63,80 @@ macro_rules! entity_data {
 
 impl Component for EntityType {}
 
-struct Ai {
-    attack: bool,
-    flee: bool,
-}
-
 entity_data! {
-    Rock: {
-        name: "rock",
-        ch: '*',
+    Skeleton: {
+        name: "skeleton",
+        ch: '%',
         color: Some(Color::White),
         class: EntityClass::Item {
             display_priority: 10,
         },
     }
-    Corpse: {
-        name: "corpse",
+    Rock: { // (t)hrow
+        name: "rock",
+        ch: '*',
+        color: Some(Color::White),
+        class: EntityClass::Item {
+            display_priority: 9,
+        },
+    }
+    Herb: { // (e)at to heal
+        name: "healing herbs",
         ch: '%',
-        color: Some(Color::Red),
+        color: Some(Color::Green),
+        class: EntityClass::Item {
+            display_priority: 7,
+        },
+    }
+    Arrow: { // fired by bow
+        name: "arrow",
+        ch: '/',
+        color: Some(Color::Yellow),
+        class: EntityClass::Item {
+            display_priority: 6,
+        },
+    }
+    Diamond: { // score item
+        name: "diamond",
+        ch: '*',
+        color: Some(Color::Cyan),
         class: EntityClass::Item {
             display_priority: 5,
         },
     }
+    Sword: { // melee weapon
+        name: "sword",
+        ch: '|',
+        color: Some(Color::White),
+        class: EntityClass::Item {
+            display_priority: 3,
+        },
+    }
+    Bow: { // (f)ire arrows
+        name: "bow",
+        ch: '}',
+        color: Some(Color::Yellow),
+        class: EntityClass::Item {
+            display_priority: 2,
+        },
+    }
+    Corpse: { // (d)rop to attract monsters
+        name: "corpse",
+        ch: '%',
+        color: Some(Color::Red),
+        class: EntityClass::Item {
+            display_priority: 1,
+        },
+    }
+    Scroll: { // not a real item... for display purposes
+        name: "scroll",
+        ch: '?',
+        color: Some(Color::White),
+        class: EntityClass::Item {
+            display_priority: 0,
+        },
+    }
+
     Rat: {
         name: "rat",
         ch: 'r',
@@ -86,11 +144,13 @@ entity_data! {
         class: EntityClass::Actor {
             max_health: 2,
             max_stamina: 2,
-            max_satiation: 20,
+            max_satiation: 10,
             fov_range: 3,
+            damage: 1,
             ai: Some(Ai {
                 attack: true,
                 flee: true,
+                wanders: true,
             }),
         },
     }
@@ -103,12 +163,49 @@ entity_data! {
             max_stamina: 5,
             max_satiation: 40,
             fov_range: 4,
+            damage: 0,
             ai: Some(Ai {
                 attack: false,
                 flee: true,
+                wanders: true,
             }),
         },
     }
+    Wolf: {
+        name: "wolf",
+        ch: 'w',
+        color: Some(Color::White),
+        class: EntityClass::Actor {
+            max_health: 5,
+            max_stamina: 5,
+            max_satiation: 40,
+            fov_range: 4,
+            damage: 2,
+            ai: Some(Ai {
+                attack: true,
+                flee: false,
+                wanders: true,
+            }),
+        },
+    }
+    Dragon: {
+        name: "dragon",
+        ch: 'D',
+        color: Some(Color::Green),
+        class: EntityClass::Actor {
+            max_health: 15,
+            max_stamina: 10,
+            max_satiation: 200,
+            fov_range: 5,
+            damage: 3,
+            ai: Some(Ai {
+                attack: true,
+                flee: true,
+                wanders: false,
+            }),
+        },
+    }
+
     Player: {
         name: "player",
         ch: '@',
@@ -118,6 +215,7 @@ entity_data! {
             max_stamina: 10,
             max_satiation: 100,
             fov_range: 4,
+            damage: 1,
             ai: None,
         },
     }
@@ -162,6 +260,7 @@ fn step_towards(g: &mut Game, actor: Entity, pos: Position) -> Position {
 
 // TODO: dedup with Game::move_entity
 fn move_towards(g: &mut Game, actor: Entity, pos: Position) -> bool {
+    // TODO: allow running if sufficient stamina
     let actor_pos: Option<Location> = g.world.get(actor).cloned();
     let new_pos = step_towards(g, actor, pos);
     if actor_pos == Some(Location::Position(new_pos)) { return false; }
@@ -182,12 +281,25 @@ fn move_towards(g: &mut Game, actor: Entity, pos: Position) -> bool {
     false
 }
 
+fn move_randomly(g: &mut Game, actor: Entity) {
+    let actor_pos: Option<Location> = g.world.get(actor).cloned();
+    if let Some(Location::Position(actor_pos)) = actor_pos {
+        for _ in 0..8 {
+            let &dir = g.rand.choose(&ALL_DIRECTIONS).unwrap();
+            let moved = move_towards(g, actor, actor_pos.step(dir));
+            if moved {
+                return;
+            }
+        }
+    }
+}
+
 impl AiState {
     pub fn take_turn(mut self, g: &mut Game, actor: Entity) -> AiState {
         let actor_type: Option<EntityType> = g.world.get(actor).cloned();
         let actor_pos: Option<Location> = g.world.get(actor).cloned();
         if let (Some(actor_type), Some(Location::Position(actor_pos))) = (actor_type, actor_pos) {
-            if let &EntityClass::Actor { fov_range, ai: Some(ref ai), .. } = &actor_type.data().class {
+            if let EntityClass::Actor { fov_range, ai: Some(ref ai), .. } = actor_type.data().class {
                 let player = (|| {
                     let distance = g.world.entity_ref(actor_pos).get::<IsVisible>().map(|v| v.0);
                     if distance.map(|d| d <= fov_range).unwrap_or(false) {
@@ -200,11 +312,12 @@ impl AiState {
                     None
                 }) ();
 
+                let fov_range = fov_range as i32;
                 match self {
                     AiState::Waiting => {}
                     AiState::Wandering(pos) => {
                         let moved = move_towards(g, actor, pos);
-                        if !moved {
+                        if !moved && ai.wanders {
                             self = AiState::Waiting;
                         }
                     }
@@ -214,23 +327,39 @@ impl AiState {
                             y: actor_pos.y*2 - pos.y,
                         });
                         if !moved {
-                            self = AiState::Waiting;
+                            move_randomly(g, actor);
                         } else {
                             if let Some((player_id, player_pos)) = player {
                                 if player_id == id {
                                     return AiState::Fleeing(id, player_pos);
                                 }
                             }
-                            // TODO: stop fleeing eventually
-                            return self;
+                            if actor_pos.distance_sq(pos) > 16*fov_range*fov_range {
+                                return AiState::Waiting;
+                            }
                         }
+                        return self;
                     }
                     AiState::Hunting(id, pos) => {
-                        // TODO: if next to player, attack
+                        if let Some(Location::Position(target_pos)) = g.world.get(id).cloned() {
+                            if actor_pos.distance_sq(target_pos) < 4 {
+                                // TODO: if stamina is at 0, do something else
+                                g.attack(actor, id);
+                                return self;
+                            }
+                        }
                         let moved = move_towards(g, actor, pos);
+                        if !moved {
+                            if pos == actor_pos {
+                                self = AiState::Waiting;
+                            } else {
+                                move_randomly(g, actor);
+                            }
+                        }
                     }
                 }
 
+                // TODO: add hunting of corpses
                 if let Some((player_id, player_pos)) = player {
                     if ai.attack {
                         return AiState::Hunting(player_id, player_pos);
@@ -239,7 +368,14 @@ impl AiState {
                     }
                 }
 
-                // TODO: Wander, especially if waiting
+                // if ai.wanders {
+                    if let AiState::Waiting = self {
+                        return AiState::Wandering(Position {
+                            x: actor_pos.x + g.rand.gen_range(0, 2*fov_range) - g.rand.gen_range(0, 2*fov_range),
+                            y: actor_pos.y + g.rand.gen_range(0, 2*fov_range) - g.rand.gen_range(0, 2*fov_range),
+                        });
+                    }
+                // }
 
                 // TODO: herding / pack behavior?
             }

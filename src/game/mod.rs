@@ -5,7 +5,8 @@ use ::engine::*;
 
 // TODO: how much of this stuff really need to be public?
 mod entity;
-use self::entity::*;
+use self::entity::{CorpseType, AiState, EntityClass, EntityData};
+pub use self::entity::EntityType;
 
 mod position;
 use self::position::*;
@@ -87,6 +88,12 @@ world! {
 pub enum Action {
     Wait,
     Move(Direction),
+    EatHerb,
+    ReadScroll,
+    GetCorpse,
+    DropCorpse,
+    ThrowRock { dx: i32, dy: i32 },
+    FireBow(Direction),
 }
 
 impl GameWorld {
@@ -165,6 +172,19 @@ pub struct Game {
     rand: StdRng,
 }
 
+pub struct PlayerStatus {
+    pub health: i8,
+    pub max_health: i8,
+    pub has_bow: bool,
+    pub has_sword: bool,
+    pub arrows: i32,
+    pub herbs: i32,
+    pub rocks: i32,
+    pub corpses: i32,
+    pub diamonds: i32,
+    pub recall_turns: Option<i32>,
+}
+
 impl Game {
     pub fn new(seed: u64) -> Game {
         let mut g = Game {
@@ -180,11 +200,18 @@ impl Game {
     pub fn take_turn(&mut self, action: Action) {
         if let Some(player) = self.find_player() {
             match action {
-                Action::Wait => { /* TODO */ }
+                Action::Wait => {}
                 Action::Move(dir) => {
                     let moved = self.move_entity(player, dir);
+                    self.auto_pickup();
                     if !moved { return; }
                 }
+                Action::EatHerb => { /* TODO */ }
+                Action::ReadScroll => { /* TODO */ }
+                Action::GetCorpse => { /* TODO */ }
+                Action::DropCorpse => { /* TODO */ }
+                Action::ThrowRock { dx, dy } => { /* TODO */ }
+                Action::FireBow(dir) => { /* TODO */ }
             }
         }
         update_fov(self);
@@ -216,9 +243,8 @@ impl Game {
             cell = tile.render_memory();
         }
 
-        // TODO: reenable FOV
-        // if let Some(&IsVisible(dist)) = self.world.get(pos) {
-        //     if dist <= self.player_fov_range() {
+        if let Some(&IsVisible(dist)) = self.world.get(pos) {
+            if dist <= self.player_fov_range() {
                 cell = self.get_tile(pos).render();
 
                 let mut data: Option<&'static EntityData> = None;
@@ -245,35 +271,36 @@ impl Game {
                         ch: d.ch,
                         fg: d.color.unwrap_or(cell.fg),
                         bg: cell.bg,
-                        bold: d.is_actor(),
+                        bold: true, // d.is_actor(),
                     }
                 }
-        //     }
-        // }
+            }
+        }
 
         cell
     }
 
-    pub fn player_status(&self) -> String {
+    pub fn player_status(&self) -> Option<PlayerStatus> {
         if let Some(player) = self.find_player() {
             let player_ref = self.world.entity_ref(player);
-            if let Some(&EntityClass::Actor {
-                max_health, max_stamina, max_satiation, ..
-            }) = player_ref.get::<EntityType>().map(|d| &d.data().class)
-            {
+            // TODO: don't hardcode player type (handle death better)
+            if let EntityClass::Actor { max_health, .. } = EntityType::Player.data().class {
                 let damage = player_ref.get::<Damage>().map(|d| d.0).unwrap_or(0);
-                let exhaustion = player_ref.get::<Exhaustion>().map(|e| e.0).unwrap_or(0);
-                let hunger = player_ref.get::<Hunger>().map(|h| h.0).unwrap_or(0);
-                return format!(
-                    " Health: {:2}/{} -- Stamina: {:2}/{} -- Satiation: {:3}/{} ",
-                    max_health - damage, max_health,
-                    max_stamina - exhaustion, max_stamina,
-                    max_satiation - hunger, max_satiation,
-                );
+                return Some(PlayerStatus {
+                    max_health,
+                    health: max_health - damage,
+                    has_bow: self.inventory_count(EntityType::Bow) > 0,
+                    has_sword: self.inventory_count(EntityType::Sword) > 0,
+                    arrows: self.inventory_count(EntityType::Arrow),
+                    herbs: self.inventory_count(EntityType::Herb),
+                    rocks: self.inventory_count(EntityType::Rock),
+                    corpses: self.inventory_count(EntityType::Corpse),
+                    diamonds: self.inventory_count(EntityType::Diamond),
+                    recall_turns: None,
+                });
             }
         }
-        // TODO: Add final score or something?
-        format!(" Game over. Press 'N' to restart. ")
+        None
     }
 
     pub fn player_position(&self) -> Option<Position> {
@@ -306,6 +333,34 @@ impl Game {
     fn find_player(&self) -> Option<Entity> {
         // TODO: make sure there is at most one player?
         self.world.component_ids::<IsPlayer>().next()
+    }
+
+    fn auto_pickup(&mut self) {
+        if let (Some(pos), Some(player)) = (self.player_position(), self.find_player()) {
+            let new_items: Vec<_> =
+                if let Some(&Contents(ref entities)) = self.world.get(pos)
+            {
+                entities.iter()
+                    .cloned()
+                    .filter(|&id| {
+                        if let Some(entity_type) = self.world.entity_ref(id)
+                            .get::<EntityType>().cloned()
+                        {
+                            [
+                                EntityType::Sword, EntityType::Bow,
+                                EntityType::Arrow, EntityType::Rock,
+                                EntityType::Herb, EntityType::Diamond,
+                            ].contains(&entity_type)
+                        } else {
+                            false
+                        }
+                    })
+                    .collect()
+            } else { return; };
+            for item in new_items {
+                self.world.set_location(item, Location::Entity(player));
+            }
+        }
     }
 
     fn player_fov_range(&self) -> i8 {
@@ -351,13 +406,18 @@ impl Game {
     }
 
     fn attack(&mut self, attacker: Entity, target: Entity) -> bool {
-        // TODO: figure out whether I want these checks or not
-        if !self.is_actor(attacker) || !self.is_actor(target) { return false; }
+        // TODO: figure out whether I want this check or not
         if self.is_player(attacker) == self.is_player(target) { return false; }
 
-        // TODO: make this less bad
-        self.add_damage(target, 1);
-        true
+        let actor_type: Option<EntityType> = self.world.get(attacker).cloned();
+        if let Some(actor_type) = actor_type {
+            if let EntityClass::Actor { damage, .. } = actor_type.data().class {
+                // TODO: handle player damage
+                self.add_damage(target, damage);
+                return true;
+            }
+        }
+        false
     }
 
     fn is_player(&self, id: Entity) -> bool {
@@ -437,7 +497,6 @@ impl Game {
         self.world.entity_mut(id).remove::<AiState>();
     }
 
-    // TODO: this is a temporary (for testing)
     fn put_entity(&mut self, t: EntityType, p: Position) {
         let id = Entity(self.next_id);
         self.next_id += 1;
@@ -448,5 +507,41 @@ impl Game {
         }
         self.world.insert(id, t);
         self.world.set_location(id, Location::Position(p));
+    }
+
+    fn inventory_count(&self, t: EntityType) -> i32 {
+        let mut count = 0;
+        if let Some(player) = self.find_player() {
+            if let Some(&Contents(ref inventory)) = self.world.get(player) {
+                for &item_id in inventory {
+                    if self.world.get(item_id) == Some(&t) {
+                        count += 1;
+                    }
+                }
+            }
+        }
+        count
+    }
+
+    fn find_item(&self, t: EntityType) -> Option<Entity> {
+        if let Some(player) = self.find_player() {
+            if let Some(&Contents(ref inventory)) = self.world.get(player) {
+                for &item_id in inventory {
+                    if self.world.get(item_id) == Some(&t) {
+                        return Some(item_id);
+                    }
+                }
+            }
+        }
+        None
+    }
+
+    fn consume_item(&mut self, t: EntityType) -> bool {
+        if let Some(item) = self.find_item(t) {
+            self.world.remove_location(item);
+            true
+        } else {
+            false
+        }
     }
 }

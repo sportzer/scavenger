@@ -1,7 +1,6 @@
 use std::collections::{BinaryHeap, HashSet, HashMap};
 use rand::Rng;
 
-use ::engine::*;
 use super::*;
 
 trait Feature {
@@ -148,7 +147,7 @@ fn add_feature_at<F: Feature>(g: &mut Game, mut f: F, pos: Option<Position>) {
     }
 }
 
-fn add_feature<F: Feature>(g: &mut Game, mut f: F) {
+fn add_feature<F: Feature>(g: &mut Game, f: F) {
     add_feature_at(g, f, None);
 }
 
@@ -171,14 +170,13 @@ fn find_map_edge(g: &mut Game) -> Option<Position> {
 fn create_ground(g: &mut Game) {
     let mut queue = BinaryHeap::new();
     let mut visited = HashSet::new();
-    let mut player_pos = Position { x: 0, y: 0 };
-    g.world.insert(player_pos, Tile::BoringGround);
-    queue.push((0, player_pos));
-    visited.insert(player_pos);
+    let initial_pos = Position { x: 0, y: 0 };
+    g.world.insert(initial_pos, Tile::BoringGround);
+    queue.push((0, initial_pos));
+    visited.insert(initial_pos);
 
     while visited.len() < 4000 {
         let (priority, pos) = queue.pop().unwrap();
-        player_pos = pos;
         for &dir in &ALL_DIRECTIONS {
             let next_pos = pos.step(dir);
             if !visited.contains(&next_pos) && (
@@ -196,7 +194,7 @@ fn create_ground(g: &mut Game) {
 struct RiverSegment;
 
 impl TerrainFeature for RiverSegment {
-    fn pick_tile<R: Rng>(&mut self, distance: i32, rand: &mut R) -> (Tile, i32) {
+    fn pick_tile<R: Rng>(&mut self, _: i32, rand: &mut R) -> (Tile, i32) {
         (Tile::ShallowWater, rand.gen_range(2, 3))
     }
 
@@ -321,14 +319,96 @@ pub fn init_game(g: &mut Game) {
 
     place_player(g);
 
-    // TODO: add creatures and items and hero corpses (skeletons?)
-    // g.put_entity(EntityType::Rock, Position { x: 3, y: 3 });
-    g.put_entity(EntityType::Rat, Position { x: 5, y: 3 });
-    // g.put_entity(EntityType::Rock, Position { x: 4, y: 4 });
-    g.put_entity(EntityType::Rat, Position { x: 4, y: 4 });
+    let is_land = |tile| [
+        Tile::Ground, Tile::BoringGround, Tile::ShortGrass, Tile::LongGrass,
+    ].contains(&tile);
 
-    g.put_entity(EntityType::Deer, Position { x: 7, y: 7 });
+    {
+        let mut randomly_place = |entity_type, count| {
+            for _ in 0..count {
+                if let Some(pos) = select_position(g, &is_land) {
+                    g.put_entity(entity_type, pos);
+                }
+            }
+        };
 
-    // g.put_entity(EntityType::Rock, Position { x: 7, y: 5 });
-    // g.put_entity(EntityType::Rock, Position { x: 7, y: 6 });
+        randomly_place(EntityType::Rock, 32);
+        randomly_place(EntityType::Herb, 8);
+        randomly_place(EntityType::Rat, 8);
+        randomly_place(EntityType::Deer, 8);
+        randomly_place(EntityType::Wolf, 4);
+    }
+
+    let mut diamond_count = 0;
+
+    for _ in 0..2 { // 0 + 2 * 3 = 6
+        if let Some(pos) = select_position(g, &is_land) {
+            g.put_entity(EntityType::Skeleton, pos);
+            for _ in 0..g.rand.gen_range(0, 1) {
+                g.put_entity(EntityType::Herb, pos);
+            }
+            for _ in 0..g.rand.gen_range(1, 3) {
+                g.put_entity(EntityType::Diamond, pos);
+                diamond_count += 1;
+            }
+            for _ in 0..g.rand.gen_range(3, 5) {
+                g.put_entity(EntityType::Arrow, pos);
+            }
+            g.put_entity(EntityType::Bow, pos);
+        }
+    }
+
+    for _ in 0..2 { // 6 + 2 * 3 = 12
+        if let Some(pos) = select_position(g, &is_land) {
+            g.put_entity(EntityType::Skeleton, pos);
+            for _ in 0..g.rand.gen_range(0, 2) {
+                g.put_entity(EntityType::Herb, pos);
+            }
+            for _ in 0..g.rand.gen_range(1, 3) {
+                g.put_entity(EntityType::Diamond, pos);
+                diamond_count += 1;
+            }
+            g.put_entity(EntityType::Sword, pos);
+        }
+    }
+
+    for _ in 0..2 { // 12 + 2 * 5 = 22
+        if let Some(pos) = select_position(g, &is_land) {
+            g.put_entity(EntityType::Skeleton, pos);
+            for _ in 0..g.rand.gen_range(0, 1) {
+                g.put_entity(EntityType::Herb, pos);
+            }
+            for _ in 0..g.rand.gen_range(2, 5) {
+                g.put_entity(EntityType::Diamond, pos);
+                diamond_count += 1;
+            }
+            for _ in 0..g.rand.gen_range(0, 3) {
+                g.put_entity(EntityType::Arrow, pos);
+            }
+            for _ in 0..g.rand.gen_range(0, 1) {
+                g.put_entity(EntityType::Sword, pos);
+            }
+            for _ in 0..g.rand.gen_range(0, 1) {
+                g.put_entity(EntityType::Bow, pos);
+            }
+            g.put_entity(EntityType::Dragon, pos);
+        }
+    }
+
+    for _ in 0..3 { // 22 + 3 * 2 = 28
+        if let Some(pos) = select_position(g, &is_land) {
+            g.put_entity(EntityType::Skeleton, pos);
+            for _ in 0..g.rand.gen_range(0, 2) {
+                g.put_entity(EntityType::Diamond, pos);
+                diamond_count += 1;
+            }
+        }
+    }
+
+    while diamond_count < 30 {
+        if let Some(pos) = select_position(g, &is_land) {
+            g.put_entity(EntityType::Diamond, pos);
+            diamond_count += 1;
+        }
+    }
 }

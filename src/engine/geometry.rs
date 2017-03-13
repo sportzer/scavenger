@@ -82,4 +82,10 @@ impl Position {
             Direction::NorthWest => Position { x: self.x - 1, y: self.y - 1 },
         }
     }
+
+    pub fn distance_sq(self, p: Position) -> i32 {
+        let x_offset = self.x - p.x;
+        let y_offset = self.y - p.y;
+        x_offset*x_offset + y_offset*y_offset
+    }
 }
