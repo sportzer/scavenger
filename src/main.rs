@@ -14,6 +14,13 @@ use engine::*;
 mod game;
 use game::*;
 
+#[derive(Eq, PartialEq)]
+enum InputMode {
+    Normal,
+    Fire,
+    Throw(Position),
+    None,
+}
 
 fn main() {
     let window = pancurses::initscr();
@@ -42,6 +49,7 @@ fn main() {
         let mut g = Game::new(rand::thread_rng().gen());
         let mut display_center = g.player_position()
             .unwrap_or(Position { x: 0, y: 0 });
+        let mut mode = InputMode::Normal;
 
         'game: loop {
             window.erase();
@@ -72,6 +80,7 @@ fn main() {
                         " You escaped with {} diamonds! Press 'N' to restart.",
                         status.diamonds,
                     ));
+                    mode = InputMode::None;
                 } else if status.health > 0 {
                     window.mvaddstr(0, 1, &format!(
                         "Health: {:2}/{:2}",
@@ -105,14 +114,25 @@ fn main() {
                         " You died carrying {} diamonds. Press 'N' to restart.",
                         status.diamonds,
                     ));
+                    mode = InputMode::None;
                 }
             }
 
+            let player_position = g.player_position();
             let (x_offset, y_offset) =
                 (display_center.x - max_x/2, display_center.y - max_y/2);
             for y in 0..max_y-1 {
                 for x in 0..max_x {
-                    let cell = g.render(Position { x: x + x_offset, y: y + y_offset });
+                    let pos = Position { x: x + x_offset, y: y + y_offset };
+                    let mut cell = g.render(pos);
+                    if mode == InputMode::Fire && Some(pos) == player_position {
+                        cell.bg = cell.fg;
+                        cell.fg = Color::Black;
+                        cell.bold = false;
+                    }
+                    if mode == InputMode::Throw(pos)  {
+                        cell.bg = Color::Red;
+                    }
                     put_cell(&window, y+1, x, cell);
                 }
             }
@@ -120,38 +140,36 @@ fn main() {
             window.refresh();
 
             let key = window.getch();
-            if let Some(action) = key.and_then(|key| match key {
-                // space bar
-                Input::Character(' ') => Some(Action::Wait),
+
+            let dir = key.and_then(|key| match key {
                 // arrow keys
-                Input::KeyDown => Some(Action::Move(Direction::South)),
-                Input::KeyUp => Some(Action::Move(Direction::North)),
-                Input::KeyLeft => Some(Action::Move(Direction::West)),
-                Input::KeyRight => Some(Action::Move(Direction::East)),
+                Input::KeyDown => Some(Direction::South),
+                Input::KeyUp => Some(Direction::North),
+                Input::KeyLeft => Some(Direction::West),
+                Input::KeyRight => Some(Direction::East),
                 // allow insert / delete / page up / page down for diagonals
-                Input::KeyIC => Some(Action::Move(Direction::NorthWest)),
-                Input::KeyDC => Some(Action::Move(Direction::SouthWest)),
-                Input::KeyPPage => Some(Action::Move(Direction::NorthEast)),
-                Input::KeyNPage => Some(Action::Move(Direction::SouthEast)),
+                Input::KeyIC => Some(Direction::NorthWest),
+                Input::KeyDC => Some(Direction::SouthWest),
+                Input::KeyPPage => Some(Direction::NorthEast),
+                Input::KeyNPage => Some(Direction::SouthEast),
                 // number keys
-                Input::Character('1') => Some(Action::Move(Direction::SouthWest)),
-                Input::Character('2') => Some(Action::Move(Direction::South)),
-                Input::Character('3') => Some(Action::Move(Direction::SouthEast)),
-                Input::Character('4') => Some(Action::Move(Direction::West)),
-                Input::Character('5') => Some(Action::Wait),
-                Input::Character('6') => Some(Action::Move(Direction::East)),
-                Input::Character('7') => Some(Action::Move(Direction::NorthWest)),
-                Input::Character('8') => Some(Action::Move(Direction::North)),
-                Input::Character('9') => Some(Action::Move(Direction::NorthEast)),
+                Input::Character('1') => Some(Direction::SouthWest),
+                Input::Character('2') => Some(Direction::South),
+                Input::Character('3') => Some(Direction::SouthEast),
+                Input::Character('4') => Some(Direction::West),
+                Input::Character('6') => Some(Direction::East),
+                Input::Character('7') => Some(Direction::NorthWest),
+                Input::Character('8') => Some(Direction::North),
+                Input::Character('9') => Some(Direction::NorthEast),
                 // vi keys
-                Input::Character('h') => Some(Action::Move(Direction::West)),
-                Input::Character('j') => Some(Action::Move(Direction::South)),
-                Input::Character('k') => Some(Action::Move(Direction::North)),
-                Input::Character('l') => Some(Action::Move(Direction::East)),
-                Input::Character('y') => Some(Action::Move(Direction::NorthWest)),
-                Input::Character('u') => Some(Action::Move(Direction::NorthEast)),
-                Input::Character('b') => Some(Action::Move(Direction::SouthWest)),
-                Input::Character('n') => Some(Action::Move(Direction::SouthEast)),
+                Input::Character('h') => Some(Direction::West),
+                Input::Character('j') => Some(Direction::South),
+                Input::Character('k') => Some(Direction::North),
+                Input::Character('l') => Some(Direction::East),
+                Input::Character('y') => Some(Direction::NorthWest),
+                Input::Character('u') => Some(Direction::NorthEast),
+                Input::Character('b') => Some(Direction::SouthWest),
+                Input::Character('n') => Some(Direction::SouthEast),
                 // handle home and end to allow the numpad to work with numlock off
                 Input::Character('\x1b') => {
                     window.nodelay(true);
@@ -159,9 +177,9 @@ fn main() {
                     while let Some(key) = window.getch() { keys.push(key) }
                     window.nodelay(false);
                     if keys == [Input::Character('['), Input::Character('1'), Input::Character('~')] {
-                        Some(Action::Move(Direction::NorthWest))
+                        Some(Direction::NorthWest)
                     } else if keys == [Input::Character('['), Input::Character('4'), Input::Character('~')] {
-                        Some(Action::Move(Direction::SouthWest))
+                        Some(Direction::SouthWest)
                     } else {
                         while let Some(key) = keys.pop() {
                             window.ungetch(&key);
@@ -170,26 +188,132 @@ fn main() {
                     }
                 }
                 _ => None,
-            }) {
-                g.take_turn(action);
-            } else {
-                match key {
-                    None => {}
-                    Some(Input::Character(c)) => { match c {
-                        'Q' => { break 'application; }
-                        '\x1b' => {
-                            // handle ESC, but ignore things like Alt+key
-                            window.nodelay(true);
-                            // TODO: should probably have a menu here
-                            if window.getch().is_none() { break 'application; }
-                            while window.getch().is_some() {}
-                            window.nodelay(false);
+            });
+
+            match mode {
+                InputMode::None => {}
+                InputMode::Throw(pos) => {
+                    if let Some(dir) = dir {
+                        mode = InputMode::Throw(pos.step(dir));
+                        continue 'game;
+                    }
+                    match key {
+                        Some(Input::Character(' '))
+                            | Some(Input::Character('5'))
+                            | Some(Input::KeyB2) =>
+                        {
+                            mode = InputMode::Normal;
+                            continue 'game;
                         }
-                        'N' => { break 'game; }
+                        Some(Input::Character('f')) => {
+                            g.player_status().map(|status| {
+                                if status.has_bow && status.arrows > 0 {
+                                    mode = InputMode::Fire;
+                                }
+                            });
+                            continue 'game;
+                        }
+                        Some(Input::Character('t')) => {
+                            g.take_turn(Action::ThrowRock(pos));
+                            mode = InputMode::Normal;
+                            continue 'game;
+                        }
                         _ => {}
-                    }}
-                    _ => {}
+                    }
                 }
+                InputMode::Fire => {
+                    if let Some(dir) = dir {
+                        g.take_turn(Action::FireBow(dir));
+                        mode = InputMode::Normal;
+                        continue 'game;
+                    }
+                    match key {
+                        Some(Input::Character(' '))
+                            | Some(Input::Character('5'))
+                            | Some(Input::KeyB2) =>
+                        {
+                            mode = InputMode::Normal;
+                            continue 'game;
+                        }
+                        Some(Input::Character('f')) => {
+                            mode = InputMode::Normal;
+                            continue 'game;
+                        }
+                        Some(Input::Character('t')) => {
+                            if let Some(player_position) = g.player_position() {
+                                g.player_status().map(|status| {
+                                    if status.rocks > 0 {
+                                        mode = InputMode::Throw(player_position);
+                                    }
+                                });
+                            }
+                            continue 'game;
+                        }
+                        _ => {}
+                    }
+                }
+                InputMode::Normal => {
+                    if let Some(dir) = dir {
+                        g.take_turn(Action::Move(dir));
+                        continue 'game;
+                    }
+                    if let Some(action) = match key {
+                        Some(Input::Character(' '))
+                            | Some(Input::Character('5'))
+                            | Some(Input::KeyB2) => Some(Action::Wait),
+                        Some(Input::Character('e')) => {
+                            g.player_status().and_then(|status| {
+                                if status.health < status.max_health {
+                                    Some(Action::EatHerb)
+                                } else {
+                                    None
+                                }
+                            })
+                        },
+                        Some(Input::Character('R')) => Some(Action::ReadScroll),
+                        Some(Input::Character('g')) => Some(Action::GetCorpse),
+                        Some(Input::Character('d')) => Some(Action::DropCorpse),
+                        Some(Input::Character('t')) => {
+                            if let Some(player_position) = g.player_position() {
+                                g.player_status().map(|status| {
+                                    if status.rocks > 0 {
+                                        mode = InputMode::Throw(player_position);
+                                    }
+                                });
+                            }
+                            continue 'game;
+                        },
+                        Some(Input::Character('f')) => {
+                            g.player_status().map(|status| {
+                                if status.has_bow && status.arrows > 0 {
+                                    mode = InputMode::Fire;
+                                }
+                            });
+                            continue 'game;
+                        },
+                        _ => None,
+                    } {
+                        g.take_turn(action);
+                        continue 'game;
+                    }
+                }
+            }
+
+            match key {
+                Some(Input::Character(c)) => { match c {
+                    'Q' => { break 'application; }
+                    '\x1b' => {
+                        // handle ESC, but ignore things like Alt+key
+                        window.nodelay(true);
+                        // TODO: should probably have a menu here
+                        if window.getch().is_none() { break 'application; }
+                        while window.getch().is_some() {}
+                        window.nodelay(false);
+                    }
+                    'N' => { break 'game; }
+                    _ => {}
+                }}
+                _ => {}
             }
         }
     }

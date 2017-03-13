@@ -344,7 +344,7 @@ impl AiState {
                         if let Some(Location::Position(target_pos)) = g.world.get(id).cloned() {
                             if actor_pos.distance_sq(target_pos) < 4 {
                                 // TODO: if stamina is at 0, do something else
-                                g.attack(actor, id);
+                                g.bump_attack(actor, id);
                                 return self;
                             }
                         }

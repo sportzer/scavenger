@@ -92,7 +92,7 @@ pub enum Action {
     ReadScroll,
     GetCorpse,
     DropCorpse,
-    ThrowRock { dx: i32, dy: i32 },
+    ThrowRock(Position),
     FireBow(Direction),
 }
 
@@ -170,6 +170,7 @@ pub struct Game {
     next_id: u64,
     // TODO: this is total unserializable, I'll probably have to roll my own RNG
     rand: StdRng,
+    recall_turns: Option<i32>,
 }
 
 pub struct PlayerStatus {
@@ -191,6 +192,7 @@ impl Game {
             world: GameWorld::new(),
             next_id: 1,
             rand: StdRng::from_seed(&[seed as usize]),
+            recall_turns: None,
         };
         map::init_game(&mut g);
         update_fov(&mut g);
@@ -198,7 +200,7 @@ impl Game {
     }
 
     pub fn take_turn(&mut self, action: Action) {
-        if let Some(player) = self.find_player() {
+        if let (Some(player), Some(player_pos)) = (self.find_player(), self.player_position()) {
             match action {
                 Action::Wait => {}
                 Action::Move(dir) => {
@@ -206,29 +208,71 @@ impl Game {
                     self.auto_pickup();
                     if !moved { return; }
                 }
-                Action::EatHerb => { /* TODO */ }
-                Action::ReadScroll => { /* TODO */ }
-                Action::GetCorpse => { /* TODO */ }
-                Action::DropCorpse => { /* TODO */ }
-                Action::ThrowRock { dx, dy } => { /* TODO */ }
-                Action::FireBow(dir) => { /* TODO */ }
-            }
-        }
-        update_fov(self);
-
-        let creatures: Vec<Entity> = self.world.component_ids::<AiState>().collect();
-        for id in creatures {
-            if let Some(state) = self.world.entity_ref(id).get::<AiState>().cloned() {
-                let new_state = state.take_turn(self, id);
-                if let Some(state_mut) = self.world.entity_mut(id).get_mut::<AiState>() {
-                    *state_mut = new_state;
+                Action::EatHerb => {
+                    if self.consume_item(EntityType::Herb) {
+                        self.add_damage(player, -1);
+                    } else { return; }
+                }
+                Action::ReadScroll => { self.recall_turns = Some(self.rand.gen_range(20, 30)); }
+                Action::GetCorpse => {
+                    if let Some(corpse) = self.find_corpse() {
+                        self.world.set_location(corpse, Location::Entity(player));
+                    } else { return; }
+                }
+                Action::DropCorpse => {
+                    if let Some(corpse) = self.find_item(EntityType::Corpse) {
+                        self.world.set_location(corpse, Location::Position(player_pos));
+                    } else { return; }
+                }
+                Action::ThrowRock(pos) => {
+                    if let Some(&IsVisible(dist)) = self.world.get(pos) {
+                        if dist <= self.player_fov_range()
+                            && self.find_item(EntityType::Rock).is_some()
+                        {
+                            if self.attack_position(player, pos, 1) {
+                                self.consume_item(EntityType::Rock);
+                            } else { return; }
+                        } else { return; }
+                    } else { return; }
+                }
+                Action::FireBow(dir) => {
+                    if self.find_item(EntityType::Bow).is_some()
+                        && self.consume_item(EntityType::Arrow)
+                    {
+                        let mut pos = player_pos;
+                        for _ in 0..8 {
+                            pos = pos.step(dir);
+                            if self.get_tile(pos).is_obstructed() {
+                                break;
+                            }
+                            if self.attack_position(player, pos, 2) {
+                                break;
+                            }
+                        }
+                    } else { return; }
                 }
             }
+            update_fov(self);
+
+            let creatures: Vec<Entity> = self.world.component_ids::<AiState>().collect();
+            for id in creatures {
+                if let Some(state) = self.world.entity_ref(id).get::<AiState>().cloned() {
+                    let new_state = state.take_turn(self, id);
+                    if let Some(state_mut) = self.world.entity_mut(id).get_mut::<AiState>() {
+                        *state_mut = new_state;
+                    }
+                }
+            }
+
+            if let Some(turns) = self.recall_turns {
+                self.recall_turns = Some(turns - 1);
+                if self.recall_turns == Some(0) {
+                    self.world.remove_location(player);
+                }
+            }
+
+            update_fov(self);
         }
-
-        // TODO: per turn processing
-
-        update_fov(self);
     }
 
     pub fn render(&self, pos: Position) -> Cell {
@@ -296,7 +340,7 @@ impl Game {
                     rocks: self.inventory_count(EntityType::Rock),
                     corpses: self.inventory_count(EntityType::Corpse),
                     diamonds: self.inventory_count(EntityType::Diamond),
-                    recall_turns: None,
+                    recall_turns: self.recall_turns,
                 });
             }
         }
@@ -380,6 +424,7 @@ impl Game {
         *self.world.entity_ref(pos).get::<Tile>().unwrap_or(&Tile::Wall)
     }
 
+    // TODO: dedup with attack_position
     fn move_entity(&mut self, id: Entity, dir: Direction) -> bool {
         let location: Option<Location> = self.world.get(id).map(|&l| l);
         if let Some(Location::Position(pos)) = location {
@@ -395,7 +440,7 @@ impl Game {
                          })
                     ).map(|&id| id);
                 if let Some(target) = target {
-                    return self.attack(id, target);
+                    return self.bump_attack(id, target);
                 } else {
                     self.world.set_location(id, Location::Position(new_pos));
                 }
@@ -405,19 +450,41 @@ impl Game {
         false
     }
 
-    fn attack(&mut self, attacker: Entity, target: Entity) -> bool {
-        // TODO: figure out whether I want this check or not
+    // TODO: dedup with attack_position
+    fn bump_attack(&mut self, attacker: Entity, target: Entity) -> bool {
         if self.is_player(attacker) == self.is_player(target) { return false; }
 
         let actor_type: Option<EntityType> = self.world.get(attacker).cloned();
         if let Some(actor_type) = actor_type {
             if let EntityClass::Actor { damage, .. } = actor_type.data().class {
-                // TODO: handle player damage
-                self.add_damage(target, damage);
+                if self.is_player(attacker) && self.find_item(EntityType::Sword).is_some() {
+                    self.add_damage(target, 3);
+                } else {
+                    self.add_damage(target, damage);
+                }
                 return true;
             }
         }
         false
+    }
+
+    fn attack_position(&mut self, attacker: Entity, pos: Position, damage: i8) -> bool {
+        // TODO: make sure there is only one valid target in location?
+        let target = self.world.entity_ref(pos).get::<Contents>()
+            .and_then(|contents|
+                      contents.0.iter().find(|&&id| {
+                          self.world.entity_ref(id).get::<EntityType>().map(
+                              |t| t.data().is_actor()
+                          ).unwrap_or(false)
+                      })
+            ).map(|&id| id);
+        if let Some(target) = target {
+            if self.is_player(attacker) == self.is_player(target) { return false; }
+            self.add_damage(target, damage);
+            true
+        } else {
+            false
+        }
     }
 
     fn is_player(&self, id: Entity) -> bool {
@@ -529,6 +596,19 @@ impl Game {
                 for &item_id in inventory {
                     if self.world.get(item_id) == Some(&t) {
                         return Some(item_id);
+                    }
+                }
+            }
+        }
+        None
+    }
+
+    fn find_corpse(&self) -> Option<Entity> {
+        if let Some(pos) = self.player_position() {
+            if let Some(&Contents(ref contents)) = self.world.get(pos) {
+                for &id in contents {
+                    if self.world.get(id) == Some(&EntityType::Corpse) {
+                        return Some(id);
                     }
                 }
             }
