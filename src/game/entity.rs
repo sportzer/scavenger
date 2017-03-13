@@ -82,7 +82,7 @@ entity_data! {
     }
     Herb: { // (e)at to heal
         name: "healing herbs",
-        ch: '%',
+        ch: '+',
         color: Some(Color::Green),
         class: EntityClass::Item {
             display_priority: 7,
