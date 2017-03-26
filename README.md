@@ -4,7 +4,7 @@ I didn't get around to implementing it. Sorry about that. This README should
 tell you everything you need to know.
 
 You're in some sort of basin surrounded by cliffs. Your only way out is to read
-your scroll of recall. The ground is littered with diamonds, and the corpses of
+your scroll of recall. The ground is littered with diamonds, and the remains of
 those who came before you. Maybe they died carrying something useful? Try to
 collect as many diamonds as possible, but don't die in the process.
 
@@ -40,7 +40,8 @@ have any. Item types are as follows:
   - yellow '}': A bow. Required for firing arrows.
   - yellow '/': Arrows. If you have a bow, you can 'f'ire them to do 2 damage.
   - white '*': Rocks. Can be 't'hrown at enemies to do 1 damage.
-  - red '%': Corpse. Drops when you kill enemies. Currently complete pointless.
+  - red '%': Corpse. Drops when you kill enemies. Will attract carnivores and
+    scavengers.
   - green '+': Healing herbs. Heals 1 damage when 'e'aten.
   - cyan '*': Diamond. Try to get as many as possible without dying (the map
     contains 30).
