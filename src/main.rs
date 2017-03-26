@@ -96,9 +96,17 @@ fn main() {
                             bold,
                         }
                     );
-                    render_item(EntityType::Scroll, 18, status.recall_turns.is_none());
-                    render_item(EntityType::Sword, 18+5, status.has_sword);
-                    render_item(EntityType::Bow, 20+5, status.has_bow);
+
+                    if status.recall_turns.is_none() {
+                        render_item(EntityType::Scroll, 18, true);
+                    }
+                    if status.has_sword {
+                        render_item(EntityType::Sword, 18+5, true);
+                    }
+                    if status.has_bow {
+                        render_item(EntityType::Bow, 20+5, true);
+                    }
+
                     let render_count = |t: EntityType, x, count| {
                         window.attrset(if count > 0 { pancurses::A_BOLD } else { pancurses::A_NORMAL });
                         window.mvaddstr(0, x, &format!("$: {:2}", count));

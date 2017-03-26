@@ -31,8 +31,8 @@ visible enemy.
 ## Items
 Your inventory (and health) is displayed along the top of the screen. Each item
 type is displayed with how many of them you have, or if it doesn't make sense to
-have multiples it is light colored if you have one and darkened if you don't
-have any. Item types are as follows:
+have multiples (scroll, sword, or bow) its icon is only displayed if you have
+one. Item types are as follows:
 
   - white '?': Your scroll of recall (you start with one). Press 'R' to read it
     and be teleported to safety in 20-30 turns.
