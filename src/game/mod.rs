@@ -1,11 +1,12 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, BTreeMap};
+use std::collections::btree_map::Entry;
 use rand::{Rng, SeedableRng, StdRng};
 
 use ::engine::*;
 
 // TODO: how much of this stuff really need to be public?
 mod entity;
-use self::entity::{CorpseType, AiState, EntityClass, EntityData};
+use self::entity::{Corpse, AiState, EntityClass, EntityData};
 pub use self::entity::EntityType;
 
 mod position;
@@ -73,7 +74,7 @@ world! {
             Damage,
             Exhaustion,
             Hunger,
-            CorpseType,
+            Corpse,
             AiState,
         }
         Position: {
@@ -171,6 +172,11 @@ pub struct Game {
     // TODO: this is total unserializable, I'll probably have to roll my own RNG
     rand: StdRng,
     recall_turns: Option<i32>,
+    // TODO: I'd like this to be a component, but then I'd need a way to swap
+    // out the entire map (or I could just be super inefficient). It's a hack
+    // either way.
+    smell_strength: BTreeMap<Position, i32>,
+    current_turn: i32,
 }
 
 pub struct PlayerStatus {
@@ -193,6 +199,8 @@ impl Game {
             next_id: 1,
             rand: StdRng::from_seed(&[seed as usize]),
             recall_turns: None,
+            smell_strength: BTreeMap::new(),
+            current_turn: 0,
         };
         map::init_game(&mut g);
         update_fov(&mut g);
@@ -272,6 +280,9 @@ impl Game {
             }
 
             update_fov(self);
+
+            self.update_smells();
+            self.current_turn += 1;
         }
     }
 
@@ -320,6 +331,15 @@ impl Game {
                 }
             }
         }
+
+        // // Visualize smell propagation
+        // if "\".,=".contains(cell.ch) {
+        //     if let Some(&s) = self.smell_strength.get(&pos) {
+        //         if s > 0 && s <= 26 {
+        //             cell.ch = (64 + s) as u8 as char;
+        //         }
+        //     }
+        // }
 
         cell
     }
@@ -559,7 +579,10 @@ impl Game {
     fn kill_entity(&mut self, id: Entity) {
         let old_type = self.world.insert(id, EntityType::Corpse);
         if let Some(corpse_type) = old_type {
-            self.world.insert(id, CorpseType(corpse_type));
+            self.world.insert(id, Corpse {
+                turn_created: self.current_turn,
+                original_type: corpse_type,
+            });
         }
         self.world.entity_mut(id).remove::<AiState>();
     }
@@ -623,5 +646,54 @@ impl Game {
         } else {
             false
         }
+    }
+
+    fn update_smells(&mut self) {
+        let mut updated_smells: BTreeMap<_, _> =
+            self.world.iter().filter_map(|(pos, &tile): (Position, &Tile)| {
+                match tile {
+                    Tile::Wall => None,
+                    Tile::ShallowWater | Tile::DeepWater => Some((pos, 1)),
+                    _ => Some((pos, 2)),
+                }
+            }).map(|(pos, n)| {
+                let mut rand = self.rand;
+                let new_strength = (0..n).filter_map(|_| {
+                    let &dir = rand.choose(&ALL_DIRECTIONS).unwrap();
+                    self.smell_strength.get(&pos.step(dir))
+                }).map(Clone::clone)
+                    .min().unwrap_or(::std::i32::MAX)
+                    .saturating_add(1);
+                (pos, new_strength)
+            }).collect();
+
+        // TODO: Find some way to make stacks of corpses smell more
+        for (id, &Corpse { turn_created, .. }) in self.world.iter() {
+            self.locate_entity(id).map(|pos| {
+                let strength = (self.current_turn - turn_created) / 20;
+                match updated_smells.entry(pos) {
+                    Entry::Vacant(entry) => {
+                        entry.insert(strength);
+                    }
+                    Entry::Occupied(mut entry) => {
+                        let strength = ::std::cmp::min(*entry.get(), strength);
+                        entry.insert(strength);
+                    }
+                }
+            });
+        }
+
+        self.smell_strength = updated_smells;
+    }
+
+    fn locate_entity(&self, mut id: Entity) -> Option<Position> {
+        for _ in 0..32 { // TODO: actual cycle detection?
+            match self.world.get(id) {
+                None => { return None; }
+                Some(&Location::Entity(e)) => { id = e; }
+                Some(&Location::Position(p)) => { return Some(p); }
+            }
+        }
+        None
     }
 }

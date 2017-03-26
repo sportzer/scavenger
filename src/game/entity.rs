@@ -10,6 +10,7 @@ pub enum EntityClass {
         max_satiation: i16,
         fov_range: i8,
         damage: i8,
+        smelling: i32,
         ai: Option<Ai>,
     },
 }
@@ -147,6 +148,7 @@ entity_data! {
             max_satiation: 10,
             fov_range: 3,
             damage: 1,
+            smelling: 40,
             ai: Some(Ai {
                 attack: true,
                 flee: true,
@@ -164,6 +166,7 @@ entity_data! {
             max_satiation: 40,
             fov_range: 4,
             damage: 0,
+            smelling: 12,
             ai: Some(Ai {
                 attack: false,
                 flee: true,
@@ -181,6 +184,7 @@ entity_data! {
             max_satiation: 40,
             fov_range: 4,
             damage: 2,
+            smelling: 24,
             ai: Some(Ai {
                 attack: true,
                 flee: false,
@@ -198,6 +202,7 @@ entity_data! {
             max_satiation: 200,
             fov_range: 5,
             damage: 3,
+            smelling: 16,
             ai: Some(Ai {
                 attack: true,
                 flee: true,
@@ -216,14 +221,18 @@ entity_data! {
             max_satiation: 100,
             fov_range: 4,
             damage: 1,
+            smelling: 8,
             ai: None,
         },
     }
 }
 
-pub struct CorpseType(pub EntityType);
+pub struct Corpse {
+    pub turn_created: i32,
+    pub original_type: EntityType,
+}
 
-impl Component for CorpseType {}
+impl Component for Corpse {}
 
 #[derive(Copy, Clone)]
 pub enum AiState {
@@ -299,7 +308,7 @@ impl AiState {
         let actor_type: Option<EntityType> = g.world.get(actor).cloned();
         let actor_pos: Option<Location> = g.world.get(actor).cloned();
         if let (Some(actor_type), Some(Location::Position(actor_pos))) = (actor_type, actor_pos) {
-            if let EntityClass::Actor { fov_range, ai: Some(ref ai), .. } = actor_type.data().class {
+            if let EntityClass::Actor { fov_range, smelling, ai: Some(ref ai), .. } = actor_type.data().class {
                 let player = (|| {
                     let distance = g.world.entity_ref(actor_pos).get::<IsVisible>().map(|v| v.0);
                     if distance.map(|d| d <= fov_range).unwrap_or(false) {
@@ -365,6 +374,27 @@ impl AiState {
                         return AiState::Hunting(player_id, player_pos);
                     } else if ai.flee {
                         return AiState::Fleeing(player_id, player_pos);
+                    }
+                }
+
+                if let Some(&smell) = g.smell_strength.get(&actor_pos) {
+                    if smell <= smelling {
+                        if let Some(dir) = (0..2).filter_map(|_| {
+                            let &dir = g.rand.choose(&ALL_DIRECTIONS).unwrap();
+                            if let Some(&dir_smell) = g.smell_strength.get(&actor_pos.step(dir)) {
+                                if dir_smell < smell {
+                                    return Some(dir);
+                                }
+                            }
+                            None
+                        }).next() {
+                            if ai.attack {
+                                return AiState::Wandering(actor_pos.step(dir).step(dir).step(dir));
+                            } else if ai.flee {
+                                let dir = dir.reverse();
+                                return AiState::Wandering(actor_pos.step(dir).step(dir).step(dir));
+                            }
+                        }
                     }
                 }
 
