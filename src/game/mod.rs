@@ -72,8 +72,6 @@ world! {
             Contents,
             IsPlayer,
             Damage,
-            Exhaustion,
-            Hunger,
             Corpse,
             AiState,
         }
@@ -99,7 +97,7 @@ pub enum Action {
 
 impl GameWorld {
     fn remove_from_contents<I: Id>(&mut self, entity: Entity, location: I)
-        where GameWorld: ComponentStorage<I, Contents>
+        where GameWorld: EntityComponent<I, Contents>
     {
         let is_empty = self.entity_mut(location).get_mut::<Contents>().map(|c| {
             c.0.remove(&entity);
@@ -111,7 +109,7 @@ impl GameWorld {
     }
 
     fn remove_location(&mut self, id: Entity) -> Option<Location> {
-        let old_location = self.remove(id);
+        let old_location = self.entity_mut(id).remove();
         match old_location {
             Some(Location::Entity(e)) => { self.remove_from_contents(id, e); }
             Some(Location::Position(p)) => { self.remove_from_contents(id, p); }
@@ -121,7 +119,7 @@ impl GameWorld {
     }
 
     fn set_location(&mut self, id: Entity, l: Location) -> Option<Location> {
-        let old_location = self.insert(id, l);
+        let old_location = self.entity_mut(id).insert(l);
         match old_location {
             Some(Location::Entity(e)) => { self.remove_from_contents(id, e); }
             Some(Location::Position(p)) => { self.remove_from_contents(id, p); }
@@ -233,7 +231,7 @@ impl Game {
                     } else { return; }
                 }
                 Action::ThrowRock(pos) => {
-                    if let Some(&IsVisible(dist)) = self.world.get(pos) {
+                    if let Some(&IsVisible(dist)) = self.world.entity(pos).get() {
                         if dist <= self.player_fov_range()
                             && self.find_item(EntityType::Rock).is_some()
                         {
@@ -262,9 +260,9 @@ impl Game {
             }
             update_fov(self);
 
-            let creatures: Vec<Entity> = self.world.component_ids::<AiState>().collect();
+            let creatures: Vec<Entity> = self.world.component::<AiState>().ids().collect();
             for id in creatures {
-                if let Some(state) = self.world.entity_ref(id).get::<AiState>().cloned() {
+                if let Some(state) = self.world.entity(id).get::<AiState>().cloned() {
                     let new_state = state.take_turn(self, id);
                     if let Some(state_mut) = self.world.entity_mut(id).get_mut::<AiState>() {
                         *state_mut = new_state;
@@ -294,19 +292,19 @@ impl Game {
             bold: false,
         };
 
-        if let Some(&WasVisible(tile)) = self.world.get(pos) {
+        if let Some(&WasVisible(tile)) = self.world.entity(pos).get() {
             cell = tile.render_memory();
         }
 
-        if let Some(&IsVisible(dist)) = self.world.get(pos) {
+        if let Some(&IsVisible(dist)) = self.world.entity(pos).get() {
             if dist <= self.player_fov_range() {
                 cell = self.get_tile(pos).render();
 
                 let mut data: Option<&'static EntityData> = None;
 
-                if let Some(&Contents(ref entities)) = self.world.get(pos) {
+                if let Some(&Contents(ref entities)) = self.world.entity(pos).get() {
                     for &e in entities {
-                        if let Some(entity_data) = self.world.entity_ref(e)
+                        if let Some(entity_data) = self.world.entity(e)
                             .get::<EntityType>().map(|t| t.data())
                         {
                             data = match (data.map(|d| &d.class), &entity_data.class) {
@@ -346,7 +344,7 @@ impl Game {
 
     pub fn player_status(&self) -> Option<PlayerStatus> {
         if let Some(player) = self.find_player() {
-            let player_ref = self.world.entity_ref(player);
+            let player_ref = self.world.entity(player);
             // TODO: don't hardcode player type (handle death better)
             if let EntityClass::Actor { max_health, .. } = EntityType::Player.data().class {
                 let damage = player_ref.get::<Damage>().map(|d| d.0).unwrap_or(0);
@@ -369,7 +367,7 @@ impl Game {
 
     pub fn player_position(&self) -> Option<Position> {
         if let Some(&Location::Position(pos)) =
-            self.find_player().and_then(|id| self.world.get(id))
+            self.find_player().and_then(|id| self.world.entity(id).get())
         {
             Some(pos)
         } else {
@@ -381,7 +379,7 @@ impl Game {
         if let Some(pos) = self.player_position() {
             let fov_range = self.player_fov_range();
             let mut rect = Rect::from(pos);
-            for (pos, &IsVisible(dist)) in self.world.iter() {
+            for (pos, &IsVisible(dist)) in self.world.component::<IsVisible>().iter() {
                 if dist <= fov_range {
                     rect.extend(pos);
                 }
@@ -396,18 +394,18 @@ impl Game {
 impl Game {
     fn find_player(&self) -> Option<Entity> {
         // TODO: make sure there is at most one player?
-        self.world.component_ids::<IsPlayer>().next()
+        self.world.component::<IsPlayer>().ids().next()
     }
 
     fn auto_pickup(&mut self) {
         if let (Some(pos), Some(player)) = (self.player_position(), self.find_player()) {
             let new_items: Vec<_> =
-                if let Some(&Contents(ref entities)) = self.world.get(pos)
+                if let Some(&Contents(ref entities)) = self.world.entity(pos).get()
             {
                 entities.iter()
                     .cloned()
                     .filter(|&id| {
-                        if let Some(entity_type) = self.world.entity_ref(id)
+                        if let Some(entity_type) = self.world.entity(id)
                             .get::<EntityType>().cloned()
                         {
                             [
@@ -431,7 +429,7 @@ impl Game {
         // TODO: dynamic view distance
         if let Some(&EntityClass::Actor { fov_range, .. }) =
             self.find_player()
-            .and_then(|id| self.world.entity_ref(id).get::<EntityType>())
+            .and_then(|id| self.world.entity(id).get::<EntityType>())
             .map(|t| &t.data().class)
         {
             fov_range
@@ -441,20 +439,20 @@ impl Game {
     }
 
     fn get_tile(&self, pos: Position) -> Tile {
-        *self.world.entity_ref(pos).get::<Tile>().unwrap_or(&Tile::Wall)
+        *self.world.entity(pos).get::<Tile>().unwrap_or(&Tile::Wall)
     }
 
     // TODO: dedup with attack_position
     fn move_entity(&mut self, id: Entity, dir: Direction) -> bool {
-        let location: Option<Location> = self.world.get(id).map(|&l| l);
+        let location: Option<Location> = self.world.entity(id).get().cloned();
         if let Some(Location::Position(pos)) = location {
             let new_pos = pos.step(dir);
             if self.get_tile(new_pos).is_walkable() {
                 // TODO: make sure there is only one valid target in location?
-                let target = self.world.entity_ref(new_pos).get::<Contents>()
+                let target = self.world.entity(new_pos).get::<Contents>()
                     .and_then(|contents|
                          contents.0.iter().find(|&&id| {
-                             self.world.entity_ref(id).get::<EntityType>().map(
+                             self.world.entity(id).get::<EntityType>().map(
                                  |t| t.data().is_actor()
                              ).unwrap_or(false)
                          })
@@ -474,7 +472,7 @@ impl Game {
     fn bump_attack(&mut self, attacker: Entity, target: Entity) -> bool {
         if self.is_player(attacker) == self.is_player(target) { return false; }
 
-        let actor_type: Option<EntityType> = self.world.get(attacker).cloned();
+        let actor_type: Option<EntityType> = self.world.entity(attacker).get().cloned();
         if let Some(actor_type) = actor_type {
             if let EntityClass::Actor { damage, .. } = actor_type.data().class {
                 if self.is_player(attacker) && self.find_item(EntityType::Sword).is_some() {
@@ -490,10 +488,10 @@ impl Game {
 
     fn attack_position(&mut self, attacker: Entity, pos: Position, damage: i8) -> bool {
         // TODO: make sure there is only one valid target in location?
-        let target = self.world.entity_ref(pos).get::<Contents>()
+        let target = self.world.entity(pos).get::<Contents>()
             .and_then(|contents|
                       contents.0.iter().find(|&&id| {
-                          self.world.entity_ref(id).get::<EntityType>().map(
+                          self.world.entity(id).get::<EntityType>().map(
                               |t| t.data().is_actor()
                           ).unwrap_or(false)
                       })
@@ -508,20 +506,21 @@ impl Game {
     }
 
     fn is_player(&self, id: Entity) -> bool {
-        self.world.entity_ref(id).get::<IsPlayer>().is_some()
+        self.world.entity(id).get::<IsPlayer>().is_some()
     }
 
     fn is_actor(&self, id: Entity) -> bool {
-        self.world.entity_ref(id).get::<EntityType>()
+        self.world.entity(id).get::<EntityType>()
             .map(|t| t.data().is_actor()).unwrap_or(false)
     }
 
     fn add_damage(&mut self, target: Entity, damage: i8) {
         if let Some(&EntityClass::Actor { max_health, .. }) =
-            self.world.entity_ref(target).get::<EntityType>().map(|t| &t.data().class)
+            self.world.entity(target).get::<EntityType>().map(|t| &t.data().class)
         {
             let total_damage = {
-                let target_damage: &mut Damage = self.world.get_or_default(target);
+                let mut target_entity = self.world.entity_mut(target);
+                let target_damage: &mut Damage = target_entity.get_or_default();
                 target_damage.0 += damage;
                 if target_damage.0 < 0 { target_damage.0 = 0; }
                 target_damage.0
@@ -532,54 +531,10 @@ impl Game {
         }
     }
 
-    fn add_exhaustion(&mut self, target: Entity, exhaustion: i8) {
-        if let Some(&EntityClass::Actor { max_stamina, .. }) =
-            self.world.entity_ref(target).get::<EntityType>().map(|t| &t.data().class)
-        {
-            let excess_exhaustion = {
-                let target_exhaustion: &mut Exhaustion = self.world.get_or_default(target);
-                target_exhaustion.0 += exhaustion;
-                if target_exhaustion.0 < 0 { target_exhaustion.0 = 0; }
-                if target_exhaustion.0 >= max_stamina {
-                    let excess_exhaustion = target_exhaustion.0 - max_stamina;
-                    target_exhaustion.0 = max_stamina;
-                    Some(excess_exhaustion)
-                } else {
-                    None
-                }
-            };
-            if let Some(excess_exhaustion) = excess_exhaustion {
-                self.add_damage(target, excess_exhaustion);
-            }
-        }
-    }
-
-    fn add_hunger(&mut self, target: Entity, hunger: i16) {
-        if let Some(&EntityClass::Actor { max_satiation, .. }) =
-            self.world.entity_ref(target).get::<EntityType>().map(|t| &t.data().class)
-        {
-            let excess_hunger = {
-                let target_hunger: &mut Hunger = self.world.get_or_default(target);
-                target_hunger.0 += hunger;
-                if target_hunger.0 < 0 { target_hunger.0 = 0; }
-                if target_hunger.0 >= max_satiation {
-                    let excess_hunger = target_hunger.0 - max_satiation;
-                    target_hunger.0 = max_satiation;
-                    Some(excess_hunger)
-                } else {
-                    None
-                }
-            };
-            if let Some(excess_hunger) = excess_hunger {
-                self.add_exhaustion(target, ::std::cmp::min(excess_hunger, 127) as i8);
-            }
-        }
-    }
-
     fn kill_entity(&mut self, id: Entity) {
-        let old_type = self.world.insert(id, EntityType::Corpse);
+        let old_type = self.world.entity_mut(id).insert(EntityType::Corpse);
         if let Some(corpse_type) = old_type {
-            self.world.insert(id, Corpse {
+            self.world.entity_mut(id).insert(Corpse {
                 turn_created: self.current_turn,
                 original_type: corpse_type,
             });
@@ -591,20 +546,20 @@ impl Game {
         let id = Entity(self.next_id);
         self.next_id += 1;
         if t == EntityType::Player {
-            self.world.insert(id, IsPlayer);
+            self.world.entity_mut(id).insert(IsPlayer);
         } else if t.data().is_actor() {
-            self.world.insert(id, AiState::Waiting);
+            self.world.entity_mut(id).insert(AiState::Waiting);
         }
-        self.world.insert(id, t);
+        self.world.entity_mut(id).insert(t);
         self.world.set_location(id, Location::Position(p));
     }
 
     fn inventory_count(&self, t: EntityType) -> i32 {
         let mut count = 0;
         if let Some(player) = self.find_player() {
-            if let Some(&Contents(ref inventory)) = self.world.get(player) {
+            if let Some(&Contents(ref inventory)) = self.world.entity(player).get() {
                 for &item_id in inventory {
-                    if self.world.get(item_id) == Some(&t) {
+                    if self.world.entity(item_id).get() == Some(&t) {
                         count += 1;
                     }
                 }
@@ -615,9 +570,9 @@ impl Game {
 
     fn find_item(&self, t: EntityType) -> Option<Entity> {
         if let Some(player) = self.find_player() {
-            if let Some(&Contents(ref inventory)) = self.world.get(player) {
+            if let Some(&Contents(ref inventory)) = self.world.entity(player).get() {
                 for &item_id in inventory {
-                    if self.world.get(item_id) == Some(&t) {
+                    if self.world.entity(item_id).get() == Some(&t) {
                         return Some(item_id);
                     }
                 }
@@ -628,9 +583,9 @@ impl Game {
 
     fn find_corpse(&self) -> Option<Entity> {
         if let Some(pos) = self.player_position() {
-            if let Some(&Contents(ref contents)) = self.world.get(pos) {
+            if let Some(&Contents(ref contents)) = self.world.entity(pos).get() {
                 for &id in contents {
-                    if self.world.get(id) == Some(&EntityType::Corpse) {
+                    if self.world.entity(id).get() == Some(&EntityType::Corpse) {
                         return Some(id);
                     }
                 }
@@ -650,7 +605,7 @@ impl Game {
 
     fn update_smells(&mut self) {
         let mut updated_smells: BTreeMap<_, _> =
-            self.world.iter().filter_map(|(pos, &tile): (Position, &Tile)| {
+            self.world.component::<Tile>().iter().filter_map(|(pos, &tile)| {
                 match tile {
                     Tile::Wall => None,
                     Tile::ShallowWater | Tile::DeepWater => Some((pos, 1)),
@@ -668,7 +623,7 @@ impl Game {
             }).collect();
 
         // TODO: Find some way to make stacks of corpses smell more
-        for (id, &Corpse { turn_created, .. }) in self.world.iter() {
+        for (id, &Corpse { turn_created, .. }) in self.world.component::<Corpse>().iter() {
             self.locate_entity(id).map(|pos| {
                 let strength = (self.current_turn - turn_created) / 20;
                 match updated_smells.entry(pos) {
@@ -688,7 +643,7 @@ impl Game {
 
     fn locate_entity(&self, mut id: Entity) -> Option<Position> {
         for _ in 0..32 { // TODO: actual cycle detection?
-            match self.world.get(id) {
+            match self.world.entity(id).get() {
                 None => { return None; }
                 Some(&Location::Entity(e)) => { id = e; }
                 Some(&Location::Position(p)) => { return Some(p); }

@@ -8,10 +8,10 @@ pub struct WasVisible(pub Tile);
 impl Component for WasVisible {}
 
 pub fn update_fov(game: &mut Game) {
-    game.world.clear_component::<IsVisible>();
+    game.world.component_mut::<IsVisible>().clear();
 
     if let Some(player) = game.find_player() {
-        if let Some(&Location::Position(pos)) = game.world.get(player) {
+        if let Some(&Location::Position(pos)) = game.world.entity(player).get() {
             let view_distance = game.player_fov_range();
 
             insert(game, pos, 0, view_distance);
@@ -94,7 +94,7 @@ fn add_offset(pos: Position, x: i32, y: i32) -> Position {
 fn insert(game: &mut Game, pos: Position, distance: i8, view_distance: i8) {
     if view_distance >= distance {
         let tile = game.get_tile(pos);
-        game.world.insert(pos, WasVisible(tile));
+        game.world.entity_mut(pos).insert(WasVisible(tile));
     }
-    game.world.insert(pos, IsVisible(distance));
+    game.world.entity_mut(pos).insert(IsVisible(distance));
 }

@@ -24,7 +24,7 @@ impl<F: TerrainFeature> Feature for F {
         }
 
         let (tile, dist_increase) = self.pick_tile(dist, &mut g.rand);
-        g.world.insert(pos, tile);
+        g.world.entity_mut(pos).insert(tile);
         Some(dist_increase)
     }
 }
@@ -90,16 +90,16 @@ impl Feature for Trees {
         if dist > self.1 && g.rand.gen_range(0, self.2) == 0 {
             add_feature_at(g, Tree, Some(pos));
         } else {
-            g.world.insert(pos, Tile::Ground);
+            g.world.entity_mut(pos).insert(Tile::Ground);
         }
         Some(g.rand.gen_range(0, self.1))
     }
 }
 
 fn rand_position(g: &mut Game) -> Position {
-    let count = g.world.component_count::<Tile>();
+    let count = g.world.component::<Tile>().count();
     let index = g.rand.gen_range(0, count);
-    g.world.component_ids::<Tile>().nth(index).unwrap_or(Position { x: 0, y: 0 })
+    g.world.component::<Tile>().ids().nth(index).unwrap_or(Position { x: 0, y: 0 })
 }
 
 fn select_position<P: FnMut(Tile) -> bool>(g: &mut Game, mut predicate: P) -> Option<Position> {
@@ -154,7 +154,7 @@ fn add_feature<F: Feature>(g: &mut Game, f: F) {
 fn find_map_edge(g: &mut Game) -> Option<Position> {
     let mut count = 0;
     let mut map_edge = None;
-    for pos in g.world.component_ids::<Tile>() {
+    for pos in g.world.component::<Tile>().ids() {
         for &dir in &ORTHOGONAL_DIRECTIONS {
             if g.get_tile(pos.step(dir)) == Tile::Wall {
                 count += 1;
@@ -171,7 +171,7 @@ fn create_ground(g: &mut Game) {
     let mut queue = BinaryHeap::new();
     let mut visited = HashSet::new();
     let initial_pos = Position { x: 0, y: 0 };
-    g.world.insert(initial_pos, Tile::BoringGround);
+    g.world.entity_mut(initial_pos).insert(Tile::BoringGround);
     queue.push((0, initial_pos));
     visited.insert(initial_pos);
 
@@ -182,7 +182,7 @@ fn create_ground(g: &mut Game) {
             if !visited.contains(&next_pos) && (
                 dir.is_orthogonal() || g.rand.gen_range(0, 5) < 2
             ) {
-                g.world.insert(next_pos, Tile::BoringGround);
+                g.world.entity_mut(next_pos).insert(Tile::BoringGround);
                 let next_priority = priority - g.rand.gen_range(0, 3);
                 queue.push((next_priority, next_pos));
                 visited.insert(next_pos);
@@ -266,7 +266,7 @@ fn add_river(g: &mut Game, start: Position, end: Position) {
 
 fn place_player(g: &mut Game) {
     let pt = rand_position(g);
-    let player_pos = g.world.component_ids::<Tile>().filter(|&pos| {
+    let player_pos = g.world.component::<Tile>().ids().filter(|&pos| {
         if ![Tile::Ground, Tile::BoringGround, Tile::ShortGrass, Tile::LongGrass]
             .contains(&g.get_tile(pos))
         {
