@@ -96,6 +96,7 @@ impl Feature for Trees {
     }
 }
 
+// TODO: This is painfully inefficient. Can I do better?
 fn rand_position(g: &mut Game) -> Position {
     let count = g.world.component::<Tile>().count();
     let index = g.rand.gen_range(0, count);

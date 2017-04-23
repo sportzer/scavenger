@@ -349,7 +349,7 @@ impl Game {
             if let EntityClass::Actor { max_health, .. } = EntityType::Player.data().class {
                 let damage = player_ref.get::<Damage>().map(|d| d.0).unwrap_or(0);
                 return Some(PlayerStatus {
-                    max_health,
+                    max_health: max_health,
                     health: max_health - damage,
                     has_bow: self.inventory_count(EntityType::Bow) > 0,
                     has_sword: self.inventory_count(EntityType::Sword) > 0,

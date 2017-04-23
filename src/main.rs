@@ -1,4 +1,3 @@
-#![feature(specialization)]
 #![allow(dead_code)]  // TODO: remove me
 
 extern crate pancurses;
@@ -93,7 +92,7 @@ fn main() {
                             ch: t.data().ch,
                             fg: t.data().color.unwrap_or(Color::White),
                             bg: Color::Black,
-                            bold,
+                            bold: bold,
                         }
                     );
 
