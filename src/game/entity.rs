@@ -245,7 +245,7 @@ pub enum AiState {
 impl Component for AiState {}
 
 fn step_towards(g: &mut Game, actor: Entity, pos: Position) -> Position {
-    let actor_pos: Option<Location> = g.world.entity(actor).get().cloned();
+    let actor_pos: Option<Location> = g.world.entity(actor).get().ok().cloned();
     if let Some(Location::Position(actor_pos)) = actor_pos {
         if actor_pos != pos {
             let x_offset = pos.x - actor_pos.x;
@@ -270,18 +270,11 @@ fn step_towards(g: &mut Game, actor: Entity, pos: Position) -> Position {
 // TODO: dedup with Game::move_entity
 fn move_towards(g: &mut Game, actor: Entity, pos: Position) -> bool {
     // TODO: allow running if sufficient stamina
-    let actor_pos: Option<Location> = g.world.entity(actor).get().cloned();
+    let actor_pos: Option<Location> = g.world.entity(actor).get().ok().cloned();
     let new_pos = step_towards(g, actor, pos);
     if actor_pos == Some(Location::Position(new_pos)) { return false; }
     if g.get_tile(new_pos).is_walkable() {
-        let target = g.world.entity(new_pos).get::<Contents>()
-            .and_then(|contents|
-                      contents.0.iter().find(|&&id| {
-                          g.world.entity(id).get::<EntityType>().map(
-                              |t| t.data().is_actor()
-                          ).unwrap_or(false)
-                      })
-            ).map(|&id| id);
+        let target = g.get_actor_by_position(new_pos);
         if target.is_none() {
             g.world.set_location(actor, Location::Position(new_pos));
             return true;
@@ -291,7 +284,7 @@ fn move_towards(g: &mut Game, actor: Entity, pos: Position) -> bool {
 }
 
 fn move_randomly(g: &mut Game, actor: Entity) {
-    let actor_pos: Option<Location> = g.world.entity(actor).get().cloned();
+    let actor_pos: Option<Location> = g.world.entity(actor).get().ok().cloned();
     if let Some(Location::Position(actor_pos)) = actor_pos {
         for _ in 0..8 {
             let &dir = g.rand.choose(&ALL_DIRECTIONS).unwrap();
@@ -305,8 +298,8 @@ fn move_randomly(g: &mut Game, actor: Entity) {
 
 impl AiState {
     pub fn take_turn(mut self, g: &mut Game, actor: Entity) -> AiState {
-        let actor_type: Option<EntityType> = g.world.entity(actor).get().cloned();
-        let actor_pos: Option<Location> = g.world.entity(actor).get().cloned();
+        let actor_type: Option<EntityType> = g.world.entity(actor).get().ok().cloned();
+        let actor_pos: Option<Location> = g.world.entity(actor).get().ok().cloned();
         if let (Some(actor_type), Some(Location::Position(actor_pos))) = (actor_type, actor_pos) {
             if let EntityClass::Actor { fov_range, smelling, ai: Some(ref ai), .. } = actor_type.data().class {
                 let player = (|| {
@@ -314,7 +307,7 @@ impl AiState {
                     if distance.map(|d| d <= fov_range).unwrap_or(false) {
                         if let Some(player_id) = g.find_player() {
                             if let Some(Location::Position(player_pos)) =
-                                g.world.entity(player_id).get().cloned()
+                                g.world.entity(player_id).get().ok().cloned()
                             {
                                 return Some((player_id, player_pos));
                             }
@@ -352,7 +345,7 @@ impl AiState {
                         return self;
                     }
                     AiState::Hunting(id, pos) => {
-                        if let Some(Location::Position(target_pos)) = g.world.entity(id).get().cloned() {
+                        if let Some(Location::Position(target_pos)) = g.world.entity(id).get().ok().cloned() {
                             if actor_pos.distance_sq(target_pos) < 4 {
                                 // TODO: if stamina is at 0, do something else
                                 g.bump_attack(actor, id);

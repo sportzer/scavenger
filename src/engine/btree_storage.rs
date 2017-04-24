@@ -44,6 +44,10 @@ impl<I: Id + Ord, C: Component> ComponentStorage<I, C> for BTreeStorage<I, C> {
         self.0.len()
     }
 
+    fn clear(&mut self) {
+        self.0.clear()
+    }
+
     // fn ids<'a>(&'a self) -> Box<Iterator<Item=I> + 'a> {
     //     Box::new(self.0.keys().map(|&id| id))
     // }
@@ -55,10 +59,6 @@ impl<I: Id + Ord, C: Component> ComponentStorage<I, C> for BTreeStorage<I, C> {
     // fn iter_mut<'a>(&'a mut self) -> Box<Iterator<Item=(I, &mut C)> + 'a> {
     //     Box::new(self.0.iter_mut().map(|(&id, c)| (id, c)))
     // }
-
-    fn clear(&mut self) {
-        self.0.clear()
-    }
 }
 
 pub struct IdsMap<'a, I: Id + Ord + 'a, C: Component + 'a>(Keys<'a, I, C>);

@@ -1,3 +1,14 @@
+use std::marker::PhantomData;
+
+pub type EcsResult<T, E> = Result<T, EcsError<E>>;
+
+#[derive(Eq, PartialEq)]
+pub enum EcsError<T> {
+    InCheckOnlyMode,
+    CheckFailure(T),
+    ActionFailure(T),
+}
+
 pub trait Component {}
 
 pub trait World {
@@ -61,13 +72,14 @@ pub trait ComponentStorage<I: Id, C: Component> {
         self.get_or_else(id, Default::default)
     }
 
+    fn count(&self) -> usize;
+    fn clear(&mut self);
+
     // TODO: can I re-add these methods with appropriate Iterate bounds to get
     // better type inference?
-    fn count(&self) -> usize;
     // fn ids<'a>(&'a self) -> Box<Iterator<Item=I> + 'a>;
     // fn iter<'a>(&'a self) -> Box<Iterator<Item=(I, &C)> + 'a>;
     // fn iter_mut<'a>(&'a mut self) -> Box<Iterator<Item=(I, &mut C)> + 'a>;
-    fn clear(&mut self);
 }
 
 pub trait Iterate<'a, I, C: 'a> {
@@ -90,6 +102,18 @@ pub trait VisitComponentTypesMut<S: EntityStorage<I>, I: Id> {
 }
 
 
+#[derive(Eq, PartialEq)]
+pub struct LookupError<I: Id, C: Component> {
+    id: I,
+    _phantom_data: PhantomData<C>,
+}
+
+impl<I: Id, C: Component> LookupError<I, C> {
+    pub fn id(&self) -> I {
+        self.id
+    }
+}
+
 #[derive(Copy, Clone)]
 pub struct EntityRef<'a, S: EntityStorage<I> + 'a, I: Id> {
     world: &'a S,
@@ -103,10 +127,15 @@ impl<'a, S: EntityStorage<I> + 'a, I: Id> EntityRef<'a, S, I> {
         self.world.component::<C>().has(self.id)
     }
 
-    pub fn get<C: Component>(&self) -> Option<&'a C>
+    pub fn get<C: Component>(&self) -> EcsResult<&'a C, LookupError<I, C>>
         where S: EntityComponent<I, C>, S::Storage: 'a
     {
-        self.world.component::<C>().get(self.id)
+        self.world.component::<C>().get(self.id).ok_or(EcsError::CheckFailure(
+            LookupError {
+                id: self.id,
+                _phantom_data: PhantomData,
+            }
+        ))
     }
 
     pub fn id(&self) -> I {

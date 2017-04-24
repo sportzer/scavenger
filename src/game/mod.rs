@@ -231,7 +231,7 @@ impl Game {
                     } else { return; }
                 }
                 Action::ThrowRock(pos) => {
-                    if let Some(&IsVisible(dist)) = self.world.entity(pos).get() {
+                    if let Ok(&IsVisible(dist)) = self.world.entity(pos).get() {
                         if dist <= self.player_fov_range()
                             && self.find_item(EntityType::Rock).is_some()
                         {
@@ -262,7 +262,7 @@ impl Game {
 
             let creatures: Vec<Entity> = self.world.component::<AiState>().ids().collect();
             for id in creatures {
-                if let Some(state) = self.world.entity(id).get::<AiState>().cloned() {
+                if let Some(state) = self.world.entity(id).get::<AiState>().ok().cloned() {
                     let new_state = state.take_turn(self, id);
                     if let Some(state_mut) = self.world.entity_mut(id).get_mut::<AiState>() {
                         *state_mut = new_state;
@@ -292,19 +292,19 @@ impl Game {
             bold: false,
         };
 
-        if let Some(&WasVisible(tile)) = self.world.entity(pos).get() {
+        if let Ok(&WasVisible(tile)) = self.world.entity(pos).get() {
             cell = tile.render_memory();
         }
 
-        if let Some(&IsVisible(dist)) = self.world.entity(pos).get() {
+        if let Ok(&IsVisible(dist)) = self.world.entity(pos).get() {
             if dist <= self.player_fov_range() {
                 cell = self.get_tile(pos).render();
 
                 let mut data: Option<&'static EntityData> = None;
 
-                if let Some(&Contents(ref entities)) = self.world.entity(pos).get() {
+                if let Ok(&Contents(ref entities)) = self.world.entity(pos).get() {
                     for &e in entities {
-                        if let Some(entity_data) = self.world.entity(e)
+                        if let Ok(entity_data) = self.world.entity(e)
                             .get::<EntityType>().map(|t| t.data())
                         {
                             data = match (data.map(|d| &d.class), &entity_data.class) {
@@ -367,7 +367,7 @@ impl Game {
 
     pub fn player_position(&self) -> Option<Position> {
         if let Some(&Location::Position(pos)) =
-            self.find_player().and_then(|id| self.world.entity(id).get())
+            self.find_player().and_then(|id| self.world.entity(id).get().ok())
         {
             Some(pos)
         } else {
@@ -400,13 +400,13 @@ impl Game {
     fn auto_pickup(&mut self) {
         if let (Some(pos), Some(player)) = (self.player_position(), self.find_player()) {
             let new_items: Vec<_> =
-                if let Some(&Contents(ref entities)) = self.world.entity(pos).get()
+                if let Ok(&Contents(ref entities)) = self.world.entity(pos).get()
             {
                 entities.iter()
                     .cloned()
                     .filter(|&id| {
                         if let Some(entity_type) = self.world.entity(id)
-                            .get::<EntityType>().cloned()
+                            .get::<EntityType>().ok().cloned()
                         {
                             [
                                 EntityType::Sword, EntityType::Bow,
@@ -429,7 +429,7 @@ impl Game {
         // TODO: dynamic view distance
         if let Some(&EntityClass::Actor { fov_range, .. }) =
             self.find_player()
-            .and_then(|id| self.world.entity(id).get::<EntityType>())
+            .and_then(|id| self.world.entity(id).get::<EntityType>().ok())
             .map(|t| &t.data().class)
         {
             fov_range
@@ -442,21 +442,25 @@ impl Game {
         *self.world.entity(pos).get::<Tile>().unwrap_or(&Tile::Wall)
     }
 
+    fn get_actor_by_position(&self, pos: Position) -> Option<Entity> {
+        // TODO: make sure there is only one valid target in location?
+        self.world.entity(pos).get::<Contents>().ok()
+            .and_then(
+                |contents| contents.0.iter().find(|&&id| {
+                    self.world.entity(id).get::<EntityType>().map(
+                        |t| t.data().is_actor()
+                    ).unwrap_or(false)
+                }).cloned()
+            )
+    }
+
     // TODO: dedup with attack_position
     fn move_entity(&mut self, id: Entity, dir: Direction) -> bool {
-        let location: Option<Location> = self.world.entity(id).get().cloned();
+        let location: Option<Location> = self.world.entity(id).get().ok().cloned();
         if let Some(Location::Position(pos)) = location {
             let new_pos = pos.step(dir);
             if self.get_tile(new_pos).is_walkable() {
-                // TODO: make sure there is only one valid target in location?
-                let target = self.world.entity(new_pos).get::<Contents>()
-                    .and_then(|contents|
-                         contents.0.iter().find(|&&id| {
-                             self.world.entity(id).get::<EntityType>().map(
-                                 |t| t.data().is_actor()
-                             ).unwrap_or(false)
-                         })
-                    ).map(|&id| id);
+                let target = self.get_actor_by_position(new_pos);
                 if let Some(target) = target {
                     return self.bump_attack(id, target);
                 } else {
@@ -472,7 +476,7 @@ impl Game {
     fn bump_attack(&mut self, attacker: Entity, target: Entity) -> bool {
         if self.is_player(attacker) == self.is_player(target) { return false; }
 
-        let actor_type: Option<EntityType> = self.world.entity(attacker).get().cloned();
+        let actor_type = self.world.entity(attacker).get::<EntityType>().ok().cloned();
         if let Some(actor_type) = actor_type {
             if let EntityClass::Actor { damage, .. } = actor_type.data().class {
                 if self.is_player(attacker) && self.find_item(EntityType::Sword).is_some() {
@@ -487,15 +491,7 @@ impl Game {
     }
 
     fn attack_position(&mut self, attacker: Entity, pos: Position, damage: i8) -> bool {
-        // TODO: make sure there is only one valid target in location?
-        let target = self.world.entity(pos).get::<Contents>()
-            .and_then(|contents|
-                      contents.0.iter().find(|&&id| {
-                          self.world.entity(id).get::<EntityType>().map(
-                              |t| t.data().is_actor()
-                          ).unwrap_or(false)
-                      })
-            ).map(|&id| id);
+        let target = self.get_actor_by_position(pos);
         if let Some(target) = target {
             if self.is_player(attacker) == self.is_player(target) { return false; }
             self.add_damage(target, damage);
@@ -506,7 +502,7 @@ impl Game {
     }
 
     fn is_player(&self, id: Entity) -> bool {
-        self.world.entity(id).get::<IsPlayer>().is_some()
+        self.world.entity(id).get::<IsPlayer>().is_ok()
     }
 
     fn is_actor(&self, id: Entity) -> bool {
@@ -515,7 +511,7 @@ impl Game {
     }
 
     fn add_damage(&mut self, target: Entity, damage: i8) {
-        if let Some(&EntityClass::Actor { max_health, .. }) =
+        if let Ok(&EntityClass::Actor { max_health, .. }) =
             self.world.entity(target).get::<EntityType>().map(|t| &t.data().class)
         {
             let total_damage = {
@@ -557,9 +553,9 @@ impl Game {
     fn inventory_count(&self, t: EntityType) -> i32 {
         let mut count = 0;
         if let Some(player) = self.find_player() {
-            if let Some(&Contents(ref inventory)) = self.world.entity(player).get() {
+            if let Ok(&Contents(ref inventory)) = self.world.entity(player).get() {
                 for &item_id in inventory {
-                    if self.world.entity(item_id).get() == Some(&t) {
+                    if self.world.entity(item_id).get() == Ok(&t) {
                         count += 1;
                     }
                 }
@@ -570,9 +566,9 @@ impl Game {
 
     fn find_item(&self, t: EntityType) -> Option<Entity> {
         if let Some(player) = self.find_player() {
-            if let Some(&Contents(ref inventory)) = self.world.entity(player).get() {
+            if let Ok(&Contents(ref inventory)) = self.world.entity(player).get() {
                 for &item_id in inventory {
-                    if self.world.entity(item_id).get() == Some(&t) {
+                    if self.world.entity(item_id).get() == Ok(&t) {
                         return Some(item_id);
                     }
                 }
@@ -583,9 +579,9 @@ impl Game {
 
     fn find_corpse(&self) -> Option<Entity> {
         if let Some(pos) = self.player_position() {
-            if let Some(&Contents(ref contents)) = self.world.entity(pos).get() {
+            if let Ok(&Contents(ref contents)) = self.world.entity(pos).get() {
                 for &id in contents {
-                    if self.world.entity(id).get() == Some(&EntityType::Corpse) {
+                    if self.world.entity(id).get() == Ok(&EntityType::Corpse) {
                         return Some(id);
                     }
                 }
@@ -644,9 +640,9 @@ impl Game {
     fn locate_entity(&self, mut id: Entity) -> Option<Position> {
         for _ in 0..32 { // TODO: actual cycle detection?
             match self.world.entity(id).get() {
-                None => { return None; }
-                Some(&Location::Entity(e)) => { id = e; }
-                Some(&Location::Position(p)) => { return Some(p); }
+                Err(_) => { return None; }
+                Ok(&Location::Entity(e)) => { id = e; }
+                Ok(&Location::Position(p)) => { return Some(p); }
             }
         }
         None

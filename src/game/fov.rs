@@ -11,7 +11,7 @@ pub fn update_fov(game: &mut Game) {
     game.world.component_mut::<IsVisible>().clear();
 
     if let Some(player) = game.find_player() {
-        if let Some(&Location::Position(pos)) = game.world.entity(player).get() {
+        if let Ok(&Location::Position(pos)) = game.world.entity(player).get() {
             let view_distance = game.player_fov_range();
 
             insert(game, pos, 0, view_distance);
