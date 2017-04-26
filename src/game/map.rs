@@ -230,12 +230,6 @@ impl Feature for River {
                     .min_by_key(|pos| *self.order.get(pos).unwrap_or(&(count + 1)))
                     .unwrap();
                 add_feature_at(g, RiverSegment, Some(new_pos));
-                if self.order.get(&cur_pos).unwrap() <= self.order.get(&new_pos).unwrap() {
-                    panic!(format!("{:?}: {} -> {:?} {}",
-                                   cur_pos, self.order.get(&cur_pos).unwrap(),
-                                   new_pos, self.order.get(&new_pos).unwrap(),
-                    ));
-                }
                 cur_pos = new_pos;
             }
             self.done = true;

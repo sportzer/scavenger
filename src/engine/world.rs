@@ -1,28 +1,16 @@
-use std::marker::PhantomData;
+// TODO: switch to Option once ? works with that?
+pub type QueryResult<T> = Result<T, ()>;
 
-pub type EcsResult<T, E> = Result<T, EcsError<E>>;
+pub type ActionResult<T> = Result<T, ActionError>;
 
 #[derive(Eq, PartialEq)]
-pub enum EcsError<T> {
+pub enum ActionError {
     InCheckOnlyMode,
-    ActionFailure(T),
+    Failed,
 }
 
-// TODO: stop using Result<_ ()>
-impl<I: Id, C: Component> From<EcsError<LookupError<I, C>>> for EcsError<()> {
-    fn from(err: EcsError<LookupError<I, C>>) -> EcsError<()> {
-        match err {
-            EcsError::InCheckOnlyMode => EcsError::InCheckOnlyMode,
-            EcsError::ActionFailure(_) => EcsError::ActionFailure(()),
-        }
-    }
-}
-
-// TODO: stop using Result<_ ()>
-impl<T> From<T> for EcsError<T> {
-    fn from(err: T) -> EcsError<T> {
-        EcsError::ActionFailure(err)
-    }
+impl From<()> for ActionError {
+    fn from(_: ()) -> ActionError { ActionError::Failed }
 }
 
 pub trait Component {}
@@ -31,8 +19,8 @@ pub trait World {
     fn new() -> Self;
 
     // TODO: move this to WorldRef/Mut
-    fn err<T, E>(&self, e: E) -> EcsResult<T, E> {
-        Err(EcsError::ActionFailure(e))
+    fn err<T>(&self) -> ActionResult<T> {
+        Err(ActionError::Failed)
     }
 }
 
@@ -126,18 +114,6 @@ pub trait VisitComponentTypesMut<S: EntityStorage<I>, I: Id> {
 }
 
 
-#[derive(Eq, PartialEq)]
-pub struct LookupError<I: Id, C: Component> {
-    id: I,
-    _phantom_data: PhantomData<C>,
-}
-
-impl<I: Id, C: Component> LookupError<I, C> {
-    pub fn id(&self) -> I {
-        self.id
-    }
-}
-
 // TODO: add mutation tracking so I can use CheckFailure in places
 #[derive(Copy, Clone)]
 pub struct EntityRef<'a, S: EntityStorage<I> + 'a, I: Id> {
@@ -152,16 +128,10 @@ impl<'a, S: EntityStorage<I> + 'a, I: Id> EntityRef<'a, S, I> {
         self.world.component::<C>().has(self.id)
     }
 
-    pub fn get<C: Component>(&self) -> EcsResult<&'a C, LookupError<I, C>>
+    pub fn get<C: Component>(&self) -> QueryResult<&'a C>
         where S: EntityComponent<I, C>, S::Storage: 'a
     {
-        self.world.component::<C>().get(self.id)
-            .ok_or_else(|| {
-                EcsError::ActionFailure(LookupError {
-                    id: self.id,
-                    _phantom_data: PhantomData,
-                })
-            })
+        self.world.component::<C>().get(self.id).ok_or(())
     }
 
     pub fn id(&self) -> I {
@@ -197,7 +167,7 @@ impl<'a, S: EntityStorage<I> + 'a, I: Id> EntityMut<'a, S, I> {
         self.world.component::<C>().has(self.id)
     }
 
-    pub fn get<C: Component>(&self) -> EcsResult<&C, LookupError<I, C>>
+    pub fn get<C: Component>(&self) -> QueryResult<&C>
         where S: EntityComponent<I, C>, S::Storage: 'a
     {
         self.as_ref().get()
@@ -218,7 +188,7 @@ impl<'a, S: EntityStorage<I> + 'a, I: Id> EntityMut<'a, S, I> {
         }
     }
 
-    pub fn get_mut<C: Component>(&mut self) -> EcsResult<&mut C, LookupError<I, C>>
+    pub fn get_mut<C: Component>(&mut self) -> ActionResult<&mut C>
         where S: EntityComponent<I, C>
     {
         match self.world.component_mut::<C>().get_mut(self.id) {
@@ -228,10 +198,7 @@ impl<'a, S: EntityStorage<I> + 'a, I: Id> EntityMut<'a, S, I> {
                 self.committed = true;
                 Ok(r)
             }
-            None => Err(EcsError::ActionFailure(LookupError {
-                id: self.id,
-                _phantom_data: PhantomData,
-            })),
+            None => Err(ActionError::Failed),
         }
     }
 
@@ -242,7 +209,7 @@ impl<'a, S: EntityStorage<I> + 'a, I: Id> EntityMut<'a, S, I> {
         self.world.component_mut::<C>().insert(self.id, c)
     }
 
-    pub fn remove<C: Component>(&mut self) -> EcsResult<C, LookupError<I, C>>
+    pub fn remove<C: Component>(&mut self) -> ActionResult<C>
         where S: EntityComponent<I, C>
     {
         match self.world.component_mut::<C>().remove(self.id) {
@@ -250,10 +217,7 @@ impl<'a, S: EntityStorage<I> + 'a, I: Id> EntityMut<'a, S, I> {
                 self.commit();
                 Ok(r)
             }
-            None => Err(EcsError::ActionFailure(LookupError {
-                id: self.id,
-                _phantom_data: PhantomData,
-            })),
+            None => Err(ActionError::Failed),
         }
     }
 

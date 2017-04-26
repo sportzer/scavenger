@@ -245,8 +245,7 @@ pub enum AiState {
 impl Component for AiState {}
 
 fn step_towards(g: &mut Game, actor: Entity, pos: Position) -> Position {
-    let actor_pos: Option<Location> = g.world.entity(actor).get().ok().cloned();
-    if let Some(Location::Position(actor_pos)) = actor_pos {
+    if let Ok(actor_pos) = g.entity_position(actor) {
         if actor_pos != pos {
             let x_offset = pos.x - actor_pos.x;
             let y_offset = pos.y - actor_pos.y;
@@ -264,15 +263,17 @@ fn step_towards(g: &mut Game, actor: Entity, pos: Position) -> Position {
             return Position { x: actor_pos.x + x_offset.signum(), y: actor_pos.y + y_offset.signum() };
         }
     }
+    // TODO: return Err instead?
     pos
 }
 
 // TODO: dedup with Game::move_entity
+// TODO: return Result
 fn move_towards(g: &mut Game, actor: Entity, pos: Position) -> bool {
     // TODO: allow running if sufficient stamina
-    let actor_pos: Option<Location> = g.world.entity(actor).get().ok().cloned();
+    let actor_pos = g.entity_position(actor);
     let new_pos = step_towards(g, actor, pos);
-    if actor_pos == Some(Location::Position(new_pos)) { return false; }
+    if actor_pos == Ok(new_pos) { return false; }
     if g.get_tile(new_pos).is_walkable() {
         let target = g.get_actor_by_position(new_pos);
         if target.is_err() {
@@ -284,8 +285,7 @@ fn move_towards(g: &mut Game, actor: Entity, pos: Position) -> bool {
 }
 
 fn move_randomly(g: &mut Game, actor: Entity) {
-    let actor_pos: Option<Location> = g.world.entity(actor).get().ok().cloned();
-    if let Some(Location::Position(actor_pos)) = actor_pos {
+    if let Ok(actor_pos) = g.entity_position(actor) {
         for _ in 0..8 {
             let &dir = g.rand.choose(&ALL_DIRECTIONS).unwrap();
             let moved = move_towards(g, actor, actor_pos.step(dir));
@@ -299,21 +299,16 @@ fn move_randomly(g: &mut Game, actor: Entity) {
 impl AiState {
     pub fn take_turn(mut self, g: &mut Game, actor: Entity) -> AiState {
         let actor_type = g.world.entity(actor).get::<EntityType>().ok().cloned();
-        let actor_pos = g.world.entity(actor).get::<Location>().ok().cloned();
-        if let (Some(actor_type), Some(Location::Position(actor_pos))) = (actor_type, actor_pos) {
+        let actor_pos = g.entity_position(actor);
+        if let (Some(actor_type), Ok(actor_pos)) = (actor_type, actor_pos) {
             if let EntityClass::Actor { fov_range, smelling, ai: Some(ref ai), .. } = actor_type.data().class {
                 let player = (|| {
-                    let distance = g.world.entity(actor_pos).get::<IsVisible>().map(|v| v.0);
-                    if distance.map(|d| d <= fov_range).unwrap_or(false) {
-                        if let Some(player_id) = g.find_player() {
-                            if let Some(Location::Position(player_pos)) =
-                                g.world.entity(player_id).get().ok().cloned()
-                            {
-                                return Some((player_id, player_pos));
-                            }
-                        }
+                    let distance = g.world.entity(actor_pos).get::<IsVisible>().map(|v| v.0)?;
+                    if distance <= fov_range {
+                        Ok((g.player()?, g.player_position()?))
+                    } else {
+                        Err(())
                     }
-                    None
                 }) ();
 
                 let fov_range = fov_range as i32;
@@ -333,7 +328,7 @@ impl AiState {
                         if !moved {
                             move_randomly(g, actor);
                         } else {
-                            if let Some((player_id, player_pos)) = player {
+                            if let Ok((player_id, player_pos)) = player {
                                 if player_id == id {
                                     return AiState::Fleeing(id, player_pos);
                                 }
@@ -366,7 +361,7 @@ impl AiState {
                     }
                 }
 
-                if let Some((player_id, player_pos)) = player {
+                if let Ok((player_id, player_pos)) = player {
                     if ai.attack {
                         return AiState::Hunting(player_id, player_pos);
                     } else if ai.flee {

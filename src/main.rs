@@ -56,7 +56,7 @@ fn main() {
 
             let padding = 7;
             let old_center = display_center;
-            if let Some(fov_rect) = g.fov_bounding_rect() {
+            if let Ok(fov_rect) = g.fov_bounding_rect() {
                 if fov_rect.max_x - fov_rect.min_x + 1 + padding*2 > max_x {
                     display_center.x = (fov_rect.max_x + fov_rect.min_x) / 2;
                 } else {
@@ -144,7 +144,7 @@ fn main() {
                 for x in 0..max_x {
                     let pos = Position { x: x + x_offset, y: y + y_offset };
                     let mut cell = g.render(pos);
-                    if mode == InputMode::Fire && Some(pos) == player_position {
+                    if mode == InputMode::Fire && Ok(pos) == player_position {
                         cell.bg = cell.fg;
                         cell.fg = Color::Black;
                         cell.bold = false;
@@ -268,7 +268,7 @@ fn main() {
                             continue 'game;
                         }
                         Some(Input::Character('t')) => {
-                            if let Some(player_position) = g.player_position() {
+                            if let Ok(player_position) = g.player_position() {
                                 g.player_status().map(|status| {
                                     if status.rocks > 0 {
                                         mode = InputMode::Throw(player_position);
@@ -302,7 +302,7 @@ fn main() {
                         Some(Input::Character('g')) => Some(Action::GetCorpse),
                         Some(Input::Character('d')) => Some(Action::DropCorpse),
                         Some(Input::Character('t')) => {
-                            if let Some(player_position) = g.player_position() {
+                            if let Ok(player_position) = g.player_position() {
                                 g.player_status().map(|status| {
                                     if status.rocks > 0 {
                                         mode = InputMode::Throw(player_position);

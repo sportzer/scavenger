@@ -53,22 +53,6 @@ enum Location {
     Position(Position),
 }
 
-impl Location {
-    fn entity(self) -> Option<Entity> {
-        match self {
-            Location::Entity(e) => Some(e),
-            Location::Position(_) => None,
-        }
-    }
-
-    fn position(self) -> Option<Position> {
-        match self {
-            Location::Entity(_) => None,
-            Location::Position(p) => Some(p),
-        }
-    }
-}
-
 impl Component for Location {}
 
 #[derive(Default)]
@@ -112,7 +96,7 @@ pub enum Action {
 }
 
 impl GameWorld {
-    // TODO: return a EcsResult of some sort?
+    // TODO: return a ActionResult of some sort?
     fn remove_from_contents<I: Id>(&mut self, entity: Entity, location: I)
         where GameWorld: EntityComponent<I, Contents>
     {
@@ -126,8 +110,7 @@ impl GameWorld {
         }
     }
 
-    fn remove_location(&mut self, id: Entity) ->
-        EcsResult<Location, LookupError<Entity, Location>>
+    fn remove_location(&mut self, id: Entity) -> ActionResult<Location>
     {
         let old_location = self.entity_mut(id).remove();
         match old_location {
@@ -210,8 +193,6 @@ pub struct PlayerStatus {
     pub recall_turns: Option<i32>,
 }
 
-// TODO: Clean up EcsResult<(), _> with a type def and EcsResult<_ ()> with a
-// meaningful error type
 impl Game {
     pub fn new(seed: u64) -> Game {
         let mut g = Game {
@@ -227,14 +208,17 @@ impl Game {
         g
     }
 
-    pub fn take_turn(&mut self, action: Action) -> EcsResult<(), ()> {
-        let player = self.find_player().ok_or(())?;
-        let player_pos = self.player_position().ok_or(())?;
+    pub fn take_turn(&mut self, action: Action) -> ActionResult<()> {
+        let player = self.player()?;
+        let player_pos = self.player_position()?;
+
+        // TODO: only abort rest of turn if uncommitted
         match action {
             Action::Wait => {}
             Action::Move(dir) => {
                 self.move_entity(player, dir)?;
-                self.auto_pickup();
+                // TODO: really ignore result?
+                let _ = self.auto_pickup();
             }
             Action::EatHerb => {
                 self.consume_item(EntityType::Herb)?;
@@ -254,11 +238,11 @@ impl Game {
             Action::ThrowRock(pos) => {
                 let &IsVisible(dist) = self.world.entity(pos).get()?;
                 if dist > self.player_fov_range() {
-                    return self.world.err(());
+                    return self.world.err();
                 }
                 let rock = self.find_item(EntityType::Rock)?;
                 self.attack_position(player, pos, 1)?;
-                // TODO: do something with EcsResult?
+                // TODO: do something with ActionResult?
                 let _ = self.world.remove_location(rock);
             }
             Action::FireBow(dir) => {
@@ -362,9 +346,9 @@ impl Game {
         cell
     }
 
-    // TODO: make this return a EcsResult of some sort
+    // TODO: make this return a Result of some sort
     pub fn player_status(&self) -> Option<PlayerStatus> {
-        if let Some(player) = self.find_player() {
+        if let Ok(player) = self.player() {
             let player_ref = self.world.entity(player);
             // TODO: don't hardcode player type (handle death better)
             if let EntityClass::Actor { max_health, .. } = EntityType::Player.data().class {
@@ -386,15 +370,11 @@ impl Game {
         None
     }
 
-    // TODO: make this return a EcsResult of some sort
-    pub fn player_position(&self) -> Option<Position> {
-        self.find_player()
-            .and_then(|id| self.world.entity(id).get().ok().cloned())
-            .and_then(Location::position)
+    pub fn player_position(&self) -> QueryResult<Position> {
+        self.entity_position(self.player()?)
     }
 
-    // TODO: make this return a EcsResult of some sort
-    pub fn fov_bounding_rect(&self) -> Option<Rect> {
+    pub fn fov_bounding_rect(&self) -> QueryResult<Rect> {
         self.player_position().map(|pos| {
             let fov_range = self.player_fov_range();
             let mut rect = Rect::from(pos);
@@ -409,47 +389,39 @@ impl Game {
 }
 
 impl Game {
-    // TODO: make this return a EcsResult of some sort
-    fn find_player(&self) -> Option<Entity> {
+    fn player(&self) -> QueryResult<Entity> {
         // TODO: make sure there is at most one player?
-        self.world.component::<IsPlayer>().ids().next()
+        self.world.component::<IsPlayer>().ids().next().ok_or(())
     }
 
-    // TODO: make this return a EcsResult of some sort?
-    fn auto_pickup(&mut self) {
-        if let (Some(pos), Some(player)) = (self.player_position(), self.find_player()) {
-            let new_items: Vec<_> =
-                if let Ok(&Contents(ref entities)) = self.world.entity(pos).get()
-            {
-                entities.iter()
-                    .cloned()
-                    .filter(|&id| {
-                        if let Some(entity_type) = self.world.entity(id)
-                            .get::<EntityType>().ok().cloned()
-                        {
-                            [
-                                EntityType::Sword, EntityType::Bow,
-                                EntityType::Arrow, EntityType::Rock,
-                                EntityType::Herb, EntityType::Diamond,
-                            ].contains(&entity_type)
-                        } else {
-                            false
-                        }
-                    })
-                    .collect()
-            } else { return; };
-            for item in new_items {
-                self.world.set_location(item, Location::Entity(player));
-            }
+    fn auto_pickup(&mut self) -> QueryResult<()> {
+        let player = self.player()?;
+        let pos = self.player_position()?;
+        let new_items: Vec<_> = self.world.entity(pos).get::<Contents>()
+            .iter()
+            .flat_map(|c| &c.0)
+            .cloned()
+            .filter(
+                |&id| self.world.entity(id).get().map(
+                    |entity_type| [
+                        EntityType::Sword, EntityType::Bow,
+                        EntityType::Arrow, EntityType::Rock,
+                        EntityType::Herb, EntityType::Diamond,
+                    ].contains(entity_type)
+                ).unwrap_or(false)
+            ).collect();
+        for item in new_items {
+            self.world.set_location(item, Location::Entity(player));
         }
+        Ok(())
     }
 
-    // TODO: make this return a EcsResult of some sort?
+    // TODO: make this return a Result of some sort?
     fn player_fov_range(&self) -> i8 {
         // TODO: dynamic view distance
-        if let Some(&EntityClass::Actor { fov_range, .. }) =
-            self.find_player()
-            .and_then(|id| self.world.entity(id).get::<EntityType>().ok())
+        if let Ok(&EntityClass::Actor { fov_range, .. }) =
+            self.player()
+            .and_then(|id| self.world.entity(id).get::<EntityType>())
             .map(|t| &t.data().class)
         {
             fov_range
@@ -462,44 +434,40 @@ impl Game {
         *self.world.entity(pos).get::<Tile>().unwrap_or(&Tile::Wall)
     }
 
-    fn get_actor_by_position(&self, pos: Position) -> EcsResult<Entity, ()> {
+    fn get_actor_by_position(&self, pos: Position) -> QueryResult<Entity> {
         // TODO: make sure there is only one valid target in location?
         // TODO: clean up error handling
-        self.world.entity(pos).get::<Contents>().ok()
+        self.world.entity(pos).get::<Contents>()
             .and_then(
                 |contents| contents.0.iter().cloned().find(|&id| {
                     self.world.entity(id).get::<EntityType>().map(
                         |t| t.data().is_actor()
                     ).unwrap_or(false)
-                })
+                }).ok_or(())
             )
-            .ok_or(().into())
     }
 
-    fn move_entity(&mut self, id: Entity, dir: Direction) -> EcsResult<(), ()> {
-        if let Ok(&Location::Position(pos)) = self.world.entity(id).get() {
-            let new_pos = pos.step(dir);
-            // TODO: allow attacking enemies on unwalkable tiles?
-            if !self.get_tile(new_pos).is_walkable() {
-                return self.world.err(());
-            }
-            if let Ok(target) = self.get_actor_by_position(new_pos) {
-                self.bump_attack(id, target)
-            } else {
-                self.world.set_location(id, Location::Position(new_pos));
-                Ok(())
-            }
+    fn move_entity(&mut self, id: Entity, dir: Direction) -> ActionResult<()> {
+        let pos = self.entity_position(id)?;
+        let new_pos = pos.step(dir);
+        // TODO: allow attacking enemies on unwalkable tiles?
+        if !self.get_tile(new_pos).is_walkable() {
+            return self.world.err();
+        }
+        if let Ok(target) = self.get_actor_by_position(new_pos) {
+            self.bump_attack(id, target)
         } else {
-            self.world.err(())
+            self.world.set_location(id, Location::Position(new_pos));
+            Ok(())
         }
     }
 
-    fn bump_attack(&mut self, attacker: Entity, target: Entity) -> EcsResult<(), ()> {
+    fn bump_attack(&mut self, attacker: Entity, target: Entity) -> ActionResult<()> {
         let bump_damage = self.bump_damage(attacker)?;
         self.attack_entity(attacker, target, bump_damage)
     }
 
-    fn bump_damage(&mut self, attacker: Entity) -> EcsResult<i8, ()> {
+    fn bump_damage(&mut self, attacker: Entity) -> ActionResult<i8> {
         let actor_type = self.world.entity(attacker).get::<EntityType>()?;
         if let EntityClass::Actor { damage, .. } = actor_type.data().class {
             Ok(if self.is_player(attacker) && self.find_item(EntityType::Sword).is_ok() {
@@ -508,18 +476,18 @@ impl Game {
                 damage
             })
         } else {
-            self.world.err(())
+            self.world.err()
         }
     }
 
-    fn attack_position(&mut self, attacker: Entity, pos: Position, damage: i8) -> EcsResult<(), ()> {
+    fn attack_position(&mut self, attacker: Entity, pos: Position, damage: i8) -> ActionResult<()> {
         let target = self.get_actor_by_position(pos)?;
         self.attack_entity(attacker, target, damage)
     }
 
-    fn attack_entity(&mut self, attacker: Entity, target: Entity, damage: i8) -> EcsResult<(), ()> {
+    fn attack_entity(&mut self, attacker: Entity, target: Entity, damage: i8) -> ActionResult<()> {
         if self.is_player(attacker) == self.is_player(target) {
-            self.world.err(())
+            self.world.err()
         } else {
             self.add_damage(target, damage);
             Ok(())
@@ -530,13 +498,9 @@ impl Game {
         self.world.entity(id).get::<IsPlayer>().is_ok()
     }
 
-    fn is_actor(&self, id: Entity) -> bool {
-        self.world.entity(id).get::<EntityType>()
-            .map(|t| t.data().is_actor()).unwrap_or(false)
-    }
-
-    // TODO: make this return a EcsResult of some sort?
+    // TODO: make this return a ActionResult of some sort?
     fn add_damage(&mut self, target: Entity, damage: i8) {
+        // TODO: add helpers for getting entities as actors
         if let Ok(&EntityClass::Actor { max_health, .. }) =
             self.world.entity(target).get::<EntityType>().map(|t| &t.data().class)
         {
@@ -553,7 +517,7 @@ impl Game {
         }
     }
 
-    // TODO: make this return a EcsResult of some sort?
+    // TODO: make this return a ActionResult of some sort?
     fn kill_entity(&mut self, id: Entity) {
         let old_type = self.world.entity_mut(id).insert(EntityType::Corpse);
         if let Some(corpse_type) = old_type {
@@ -579,7 +543,7 @@ impl Game {
 
     fn inventory_count(&self, t: EntityType) -> i32 {
         let mut count = 0;
-        if let Some(player) = self.find_player() {
+        if let Ok(player) = self.player() {
             if let Ok(&Contents(ref inventory)) = self.world.entity(player).get() {
                 for &item_id in inventory {
                     if self.world.entity(item_id).get() == Ok(&t) {
@@ -591,33 +555,29 @@ impl Game {
         count
     }
 
-    fn find_item(&self, t: EntityType) -> EcsResult<Entity, ()> {
-        if let Some(player) = self.find_player() {
-            if let Ok(&Contents(ref inventory)) = self.world.entity(player).get() {
-                for &item_id in inventory {
-                    if self.world.entity(item_id).get() == Ok(&t) {
-                        return Ok(item_id);
-                    }
-                }
+    fn find_item(&self, t: EntityType) -> QueryResult<Entity> {
+        let player = self.player()?;
+        let &Contents(ref inventory) = self.world.entity(player).get()?;
+        for &item_id in inventory {
+            if self.world.entity(item_id).get() == Ok(&t) {
+                return Ok(item_id);
             }
         }
-        self.world.err(())
+        Err(())
     }
 
-    fn find_corpse(&self) -> EcsResult<Entity, ()> {
-        if let Some(pos) = self.player_position() {
-            if let Ok(&Contents(ref contents)) = self.world.entity(pos).get() {
-                for &id in contents {
-                    if self.world.entity(id).get() == Ok(&EntityType::Corpse) {
-                        return Ok(id);
-                    }
-                }
+    fn find_corpse(&self) -> QueryResult<Entity> {
+        let pos = self.player_position()?;
+        let &Contents(ref contents) = self.world.entity(pos).get()?;
+        for &id in contents {
+            if self.world.entity(id).get() == Ok(&EntityType::Corpse) {
+                return Ok(id);
             }
         }
-        self.world.err(())
+        Err(())
     }
 
-    fn consume_item(&mut self, t: EntityType) -> EcsResult<(), ()> {
+    fn consume_item(&mut self, t: EntityType) -> ActionResult<()> {
         let item = self.find_item(t)?;
         // TODO: really ignore result?
         // TODO: destroy item too?
@@ -625,7 +585,7 @@ impl Game {
         Ok(())
     }
 
-    // TODO: make this return a EcsResult of some sort?
+    // TODO: make this return a ActionResult of some sort?
     fn update_smells(&mut self) {
         let mut updated_smells: BTreeMap<_, _> =
             self.world.component::<Tile>().iter().filter_map(|(pos, &tile)| {
@@ -647,7 +607,8 @@ impl Game {
 
         // TODO: Find some way to make stacks of corpses smell more
         for (id, &Corpse { turn_created, .. }) in self.world.component::<Corpse>().iter() {
-            self.locate_entity(id).map(|pos| {
+            // TODO: really ignore errors?
+            let _ = self.locate_entity(id).map(|pos| {
                 let strength = (self.current_turn - turn_created) / 20;
                 match updated_smells.entry(pos) {
                     Entry::Vacant(entry) => {
@@ -664,15 +625,20 @@ impl Game {
         self.smell_strength = updated_smells;
     }
 
-    // TODO: make this return a EcsResult of some sort
-    fn locate_entity(&self, mut id: Entity) -> Option<Position> {
+    fn locate_entity(&self, mut id: Entity) -> QueryResult<Position> {
         for _ in 0..32 { // TODO: actual cycle detection?
-            match self.world.entity(id).get() {
-                Err(_) => { return None; }
-                Ok(&Location::Entity(e)) => { id = e; }
-                Ok(&Location::Position(p)) => { return Some(p); }
+            match self.world.entity(id).get()? {
+                &Location::Entity(e) => { id = e; }
+                &Location::Position(p) => { return Ok(p); }
             }
         }
-        None
+        Err(())
+    }
+
+    fn entity_position(&self, id: Entity) -> QueryResult<Position> {
+        match self.world.entity(id).get()? {
+            &Location::Entity(_) => Err(()),
+            &Location::Position(p) => Ok(p),
+        }
     }
 }
