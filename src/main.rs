@@ -60,14 +60,26 @@ fn main() {
                 if fov_rect.max_x - fov_rect.min_x + 1 + padding*2 > max_x {
                     display_center.x = (fov_rect.max_x + fov_rect.min_x) / 2;
                 } else {
-                    display_center.x = ::std::cmp::max(display_center.x + (max_x - max_x/2), fov_rect.max_x + 1 + padding) - (max_x - max_x/2);
-                    display_center.x = ::std::cmp::min(display_center.x - max_x/2, fov_rect.min_x - padding) + max_x/2;
+                    display_center.x = ::std::cmp::max(
+                        display_center.x + (max_x - max_x/2),
+                        fov_rect.max_x + 1 + padding,
+                    ) - (max_x - max_x/2);
+                    display_center.x = ::std::cmp::min(
+                        display_center.x - max_x/2,
+                        fov_rect.min_x - padding,
+                    ) + max_x/2;
                 }
                 if fov_rect.max_y - fov_rect.min_y + 1 + padding*2 > max_y {
                     display_center.y = (fov_rect.max_y + fov_rect.min_y) / 2 + 1;
                 } else {
-                    display_center.y = ::std::cmp::max(display_center.y + (max_y - max_y/2), fov_rect.max_y + 2 + padding) - (max_y - max_y/2);
-                    display_center.y = ::std::cmp::min(display_center.y - max_y/2, fov_rect.min_y - padding) + max_y/2;
+                    display_center.y = ::std::cmp::max(
+                        display_center.y + (max_y - max_y/2),
+                        fov_rect.max_y + 2 + padding,
+                    ) - (max_y - max_y/2);
+                    display_center.y = ::std::cmp::min(
+                        display_center.y - max_y/2,
+                        fov_rect.min_y - padding,
+                    ) + max_y/2;
                 }
             }
             if old_center != display_center { window.clear(); }
@@ -177,15 +189,23 @@ fn main() {
                 Input::Character('u') => Some(Direction::NorthEast),
                 Input::Character('b') => Some(Direction::SouthWest),
                 Input::Character('n') => Some(Direction::SouthEast),
-                // handle home and end to allow the numpad to work with numlock off
+                // handle home and end to allow numpad to work with numlock off
                 Input::Character('\x1b') => {
                     window.nodelay(true);
                     let mut keys = vec![];
                     while let Some(key) = window.getch() { keys.push(key) }
                     window.nodelay(false);
-                    if keys == [Input::Character('['), Input::Character('1'), Input::Character('~')] {
+                    if keys == [
+                        Input::Character('['),
+                        Input::Character('1'),
+                        Input::Character('~'),
+                    ] {
                         Some(Direction::NorthWest)
-                    } else if keys == [Input::Character('['), Input::Character('4'), Input::Character('~')] {
+                    } else if keys == [
+                        Input::Character('['),
+                        Input::Character('4'),
+                        Input::Character('~')
+                    ] {
                         Some(Direction::SouthWest)
                     } else {
                         while let Some(key) = keys.pop() {
@@ -197,6 +217,7 @@ fn main() {
                 _ => None,
             });
 
+            #[allow(unused_must_use)]  // TODO: handle errors?
             match mode {
                 InputMode::None => {}
                 InputMode::Throw(pos) => {

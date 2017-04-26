@@ -53,6 +53,22 @@ enum Location {
     Position(Position),
 }
 
+impl Location {
+    fn entity(self) -> Option<Entity> {
+        match self {
+            Location::Entity(e) => Some(e),
+            Location::Position(_) => None,
+        }
+    }
+
+    fn position(self) -> Option<Position> {
+        match self {
+            Location::Entity(_) => None,
+            Location::Position(p) => Some(p),
+        }
+    }
+}
+
 impl Component for Location {}
 
 #[derive(Default)]
@@ -96,24 +112,28 @@ pub enum Action {
 }
 
 impl GameWorld {
+    // TODO: return a EcsResult of some sort?
     fn remove_from_contents<I: Id>(&mut self, entity: Entity, location: I)
         where GameWorld: EntityComponent<I, Contents>
     {
         let is_empty = self.entity_mut(location).get_mut::<Contents>().map(|c| {
             c.0.remove(&entity);
             c.0.is_empty()
-        });
+        }).ok();
         if is_empty == Some(true) {
-            self.entity_mut(location).remove::<Contents>();
+            // TODO: actually just ignore?
+            let _ = self.entity_mut(location).remove::<Contents>();
         }
     }
 
-    fn remove_location(&mut self, id: Entity) -> Option<Location> {
+    fn remove_location(&mut self, id: Entity) ->
+        EcsResult<Location, LookupError<Entity, Location>>
+    {
         let old_location = self.entity_mut(id).remove();
         match old_location {
-            Some(Location::Entity(e)) => { self.remove_from_contents(id, e); }
-            Some(Location::Position(p)) => { self.remove_from_contents(id, p); }
-            None => {}
+            Ok(Location::Entity(e)) => { self.remove_from_contents(id, e); }
+            Ok(Location::Position(p)) => { self.remove_from_contents(id, p); }
+            Err(_) => {}
         }
         old_location
     }
@@ -190,6 +210,8 @@ pub struct PlayerStatus {
     pub recall_turns: Option<i32>,
 }
 
+// TODO: Clean up EcsResult<(), _> with a type def and EcsResult<_ ()> with a
+// meaningful error type
 impl Game {
     pub fn new(seed: u64) -> Game {
         let mut g = Game {
@@ -205,83 +227,81 @@ impl Game {
         g
     }
 
-    pub fn take_turn(&mut self, action: Action) {
-        if let (Some(player), Some(player_pos)) = (self.find_player(), self.player_position()) {
-            match action {
-                Action::Wait => {}
-                Action::Move(dir) => {
-                    let moved = self.move_entity(player, dir);
-                    self.auto_pickup();
-                    if !moved { return; }
-                }
-                Action::EatHerb => {
-                    if self.consume_item(EntityType::Herb) {
-                        self.add_damage(player, -1);
-                    } else { return; }
-                }
-                Action::ReadScroll => { self.recall_turns = Some(self.rand.gen_range(20, 30)); }
-                Action::GetCorpse => {
-                    if let Some(corpse) = self.find_corpse() {
-                        self.world.set_location(corpse, Location::Entity(player));
-                    } else { return; }
-                }
-                Action::DropCorpse => {
-                    if let Some(corpse) = self.find_item(EntityType::Corpse) {
-                        self.world.set_location(corpse, Location::Position(player_pos));
-                    } else { return; }
-                }
-                Action::ThrowRock(pos) => {
-                    if let Ok(&IsVisible(dist)) = self.world.entity(pos).get() {
-                        if dist <= self.player_fov_range()
-                            && self.find_item(EntityType::Rock).is_some()
-                        {
-                            if self.attack_position(player, pos, 1) {
-                                self.consume_item(EntityType::Rock);
-                            } else { return; }
-                        } else { return; }
-                    } else { return; }
-                }
-                Action::FireBow(dir) => {
-                    if self.find_item(EntityType::Bow).is_some()
-                        && self.consume_item(EntityType::Arrow)
-                    {
-                        let mut pos = player_pos;
-                        for _ in 0..8 {
-                            pos = pos.step(dir);
-                            if self.get_tile(pos).is_obstructed() {
-                                break;
-                            }
-                            if self.attack_position(player, pos, 2) {
-                                break;
-                            }
-                        }
-                    } else { return; }
-                }
+    pub fn take_turn(&mut self, action: Action) -> EcsResult<(), ()> {
+        let player = self.find_player().ok_or(())?;
+        let player_pos = self.player_position().ok_or(())?;
+        match action {
+            Action::Wait => {}
+            Action::Move(dir) => {
+                self.move_entity(player, dir)?;
+                self.auto_pickup();
             }
-            update_fov(self);
-
-            let creatures: Vec<Entity> = self.world.component::<AiState>().ids().collect();
-            for id in creatures {
-                if let Some(state) = self.world.entity(id).get::<AiState>().ok().cloned() {
-                    let new_state = state.take_turn(self, id);
-                    if let Some(state_mut) = self.world.entity_mut(id).get_mut::<AiState>() {
-                        *state_mut = new_state;
+            Action::EatHerb => {
+                self.consume_item(EntityType::Herb)?;
+                self.add_damage(player, -1);
+            }
+            Action::ReadScroll => {
+                self.recall_turns = Some(self.rand.gen_range(20, 30));
+            }
+            Action::GetCorpse => {
+                let corpse = self.find_corpse()?;
+                self.world.set_location(corpse, Location::Entity(player));
+            }
+            Action::DropCorpse => {
+                let corpse = self.find_item(EntityType::Corpse)?;
+                self.world.set_location(corpse, Location::Position(player_pos));
+            }
+            Action::ThrowRock(pos) => {
+                let &IsVisible(dist) = self.world.entity(pos).get()?;
+                if dist > self.player_fov_range() {
+                    return self.world.err(());
+                }
+                let rock = self.find_item(EntityType::Rock)?;
+                self.attack_position(player, pos, 1)?;
+                // TODO: do something with EcsResult?
+                let _ = self.world.remove_location(rock);
+            }
+            Action::FireBow(dir) => {
+                self.find_item(EntityType::Bow)?;
+                self.consume_item(EntityType::Arrow)?;
+                let mut pos = player_pos;
+                for _ in 0..8 {
+                    pos = pos.step(dir);
+                    if self.get_tile(pos).is_obstructed() {
+                        break;
+                    }
+                    if self.attack_position(player, pos, 2).is_ok() {
+                        break;
                     }
                 }
             }
+        }
 
-            if let Some(turns) = self.recall_turns {
-                self.recall_turns = Some(turns - 1);
-                if self.recall_turns == Some(0) {
-                    self.world.remove_location(player);
+        update_fov(self);
+
+        let creatures: Vec<Entity> = self.world.component::<AiState>().ids().collect();
+        for id in creatures {
+            if let Ok(&state) = self.world.entity(id).get::<AiState>() {
+                let new_state = state.take_turn(self, id);
+                if let Ok(state_mut) = self.world.entity_mut(id).get_mut::<AiState>() {
+                    *state_mut = new_state;
                 }
             }
-
-            update_fov(self);
-
-            self.update_smells();
-            self.current_turn += 1;
         }
+
+        if let Some(turns) = self.recall_turns {
+            self.recall_turns = Some(turns - 1);
+            if self.recall_turns == Some(0) {
+                // TODO: really ignore result?
+                let _ = self.world.remove_location(player);
+            }
+        }
+
+        update_fov(self);
+        self.update_smells();
+        self.current_turn += 1;
+
+        Ok(())
     }
 
     pub fn render(&self, pos: Position) -> Cell {
@@ -342,6 +362,7 @@ impl Game {
         cell
     }
 
+    // TODO: make this return a EcsResult of some sort
     pub fn player_status(&self) -> Option<PlayerStatus> {
         if let Some(player) = self.find_player() {
             let player_ref = self.world.entity(player);
@@ -365,18 +386,16 @@ impl Game {
         None
     }
 
+    // TODO: make this return a EcsResult of some sort
     pub fn player_position(&self) -> Option<Position> {
-        if let Some(&Location::Position(pos)) =
-            self.find_player().and_then(|id| self.world.entity(id).get().ok())
-        {
-            Some(pos)
-        } else {
-            None
-        }
+        self.find_player()
+            .and_then(|id| self.world.entity(id).get().ok().cloned())
+            .and_then(Location::position)
     }
 
+    // TODO: make this return a EcsResult of some sort
     pub fn fov_bounding_rect(&self) -> Option<Rect> {
-        if let Some(pos) = self.player_position() {
+        self.player_position().map(|pos| {
             let fov_range = self.player_fov_range();
             let mut rect = Rect::from(pos);
             for (pos, &IsVisible(dist)) in self.world.component::<IsVisible>().iter() {
@@ -384,19 +403,19 @@ impl Game {
                     rect.extend(pos);
                 }
             }
-            Some(rect)
-        } else {
-            None
-        }
+            rect
+        })
     }
 }
 
 impl Game {
+    // TODO: make this return a EcsResult of some sort
     fn find_player(&self) -> Option<Entity> {
         // TODO: make sure there is at most one player?
         self.world.component::<IsPlayer>().ids().next()
     }
 
+    // TODO: make this return a EcsResult of some sort?
     fn auto_pickup(&mut self) {
         if let (Some(pos), Some(player)) = (self.player_position(), self.find_player()) {
             let new_items: Vec<_> =
@@ -425,6 +444,7 @@ impl Game {
         }
     }
 
+    // TODO: make this return a EcsResult of some sort?
     fn player_fov_range(&self) -> i8 {
         // TODO: dynamic view distance
         if let Some(&EntityClass::Actor { fov_range, .. }) =
@@ -442,62 +462,67 @@ impl Game {
         *self.world.entity(pos).get::<Tile>().unwrap_or(&Tile::Wall)
     }
 
-    fn get_actor_by_position(&self, pos: Position) -> Option<Entity> {
+    fn get_actor_by_position(&self, pos: Position) -> EcsResult<Entity, ()> {
         // TODO: make sure there is only one valid target in location?
+        // TODO: clean up error handling
         self.world.entity(pos).get::<Contents>().ok()
             .and_then(
-                |contents| contents.0.iter().find(|&&id| {
+                |contents| contents.0.iter().cloned().find(|&id| {
                     self.world.entity(id).get::<EntityType>().map(
                         |t| t.data().is_actor()
                     ).unwrap_or(false)
-                }).cloned()
+                })
             )
+            .ok_or(().into())
     }
 
-    // TODO: dedup with attack_position
-    fn move_entity(&mut self, id: Entity, dir: Direction) -> bool {
-        let location: Option<Location> = self.world.entity(id).get().ok().cloned();
-        if let Some(Location::Position(pos)) = location {
+    fn move_entity(&mut self, id: Entity, dir: Direction) -> EcsResult<(), ()> {
+        if let Ok(&Location::Position(pos)) = self.world.entity(id).get() {
             let new_pos = pos.step(dir);
-            if self.get_tile(new_pos).is_walkable() {
-                let target = self.get_actor_by_position(new_pos);
-                if let Some(target) = target {
-                    return self.bump_attack(id, target);
-                } else {
-                    self.world.set_location(id, Location::Position(new_pos));
-                }
-                return true;
+            // TODO: allow attacking enemies on unwalkable tiles?
+            if !self.get_tile(new_pos).is_walkable() {
+                return self.world.err(());
             }
-        }
-        false
-    }
-
-    // TODO: dedup with attack_position
-    fn bump_attack(&mut self, attacker: Entity, target: Entity) -> bool {
-        if self.is_player(attacker) == self.is_player(target) { return false; }
-
-        let actor_type = self.world.entity(attacker).get::<EntityType>().ok().cloned();
-        if let Some(actor_type) = actor_type {
-            if let EntityClass::Actor { damage, .. } = actor_type.data().class {
-                if self.is_player(attacker) && self.find_item(EntityType::Sword).is_some() {
-                    self.add_damage(target, 3);
-                } else {
-                    self.add_damage(target, damage);
-                }
-                return true;
+            if let Ok(target) = self.get_actor_by_position(new_pos) {
+                self.bump_attack(id, target)
+            } else {
+                self.world.set_location(id, Location::Position(new_pos));
+                Ok(())
             }
-        }
-        false
-    }
-
-    fn attack_position(&mut self, attacker: Entity, pos: Position, damage: i8) -> bool {
-        let target = self.get_actor_by_position(pos);
-        if let Some(target) = target {
-            if self.is_player(attacker) == self.is_player(target) { return false; }
-            self.add_damage(target, damage);
-            true
         } else {
-            false
+            self.world.err(())
+        }
+    }
+
+    fn bump_attack(&mut self, attacker: Entity, target: Entity) -> EcsResult<(), ()> {
+        let bump_damage = self.bump_damage(attacker)?;
+        self.attack_entity(attacker, target, bump_damage)
+    }
+
+    fn bump_damage(&mut self, attacker: Entity) -> EcsResult<i8, ()> {
+        let actor_type = self.world.entity(attacker).get::<EntityType>()?;
+        if let EntityClass::Actor { damage, .. } = actor_type.data().class {
+            Ok(if self.is_player(attacker) && self.find_item(EntityType::Sword).is_ok() {
+                3
+            } else {
+                damage
+            })
+        } else {
+            self.world.err(())
+        }
+    }
+
+    fn attack_position(&mut self, attacker: Entity, pos: Position, damage: i8) -> EcsResult<(), ()> {
+        let target = self.get_actor_by_position(pos)?;
+        self.attack_entity(attacker, target, damage)
+    }
+
+    fn attack_entity(&mut self, attacker: Entity, target: Entity, damage: i8) -> EcsResult<(), ()> {
+        if self.is_player(attacker) == self.is_player(target) {
+            self.world.err(())
+        } else {
+            self.add_damage(target, damage);
+            Ok(())
         }
     }
 
@@ -510,6 +535,7 @@ impl Game {
             .map(|t| t.data().is_actor()).unwrap_or(false)
     }
 
+    // TODO: make this return a EcsResult of some sort?
     fn add_damage(&mut self, target: Entity, damage: i8) {
         if let Ok(&EntityClass::Actor { max_health, .. }) =
             self.world.entity(target).get::<EntityType>().map(|t| &t.data().class)
@@ -527,6 +553,7 @@ impl Game {
         }
     }
 
+    // TODO: make this return a EcsResult of some sort?
     fn kill_entity(&mut self, id: Entity) {
         let old_type = self.world.entity_mut(id).insert(EntityType::Corpse);
         if let Some(corpse_type) = old_type {
@@ -535,7 +562,7 @@ impl Game {
                 original_type: corpse_type,
             });
         }
-        self.world.entity_mut(id).remove::<AiState>();
+        let _ = self.world.entity_mut(id).remove::<AiState>();
     }
 
     fn put_entity(&mut self, t: EntityType, p: Position) {
@@ -564,41 +591,41 @@ impl Game {
         count
     }
 
-    fn find_item(&self, t: EntityType) -> Option<Entity> {
+    fn find_item(&self, t: EntityType) -> EcsResult<Entity, ()> {
         if let Some(player) = self.find_player() {
             if let Ok(&Contents(ref inventory)) = self.world.entity(player).get() {
                 for &item_id in inventory {
                     if self.world.entity(item_id).get() == Ok(&t) {
-                        return Some(item_id);
+                        return Ok(item_id);
                     }
                 }
             }
         }
-        None
+        self.world.err(())
     }
 
-    fn find_corpse(&self) -> Option<Entity> {
+    fn find_corpse(&self) -> EcsResult<Entity, ()> {
         if let Some(pos) = self.player_position() {
             if let Ok(&Contents(ref contents)) = self.world.entity(pos).get() {
                 for &id in contents {
                     if self.world.entity(id).get() == Ok(&EntityType::Corpse) {
-                        return Some(id);
+                        return Ok(id);
                     }
                 }
             }
         }
-        None
+        self.world.err(())
     }
 
-    fn consume_item(&mut self, t: EntityType) -> bool {
-        if let Some(item) = self.find_item(t) {
-            self.world.remove_location(item);
-            true
-        } else {
-            false
-        }
+    fn consume_item(&mut self, t: EntityType) -> EcsResult<(), ()> {
+        let item = self.find_item(t)?;
+        // TODO: really ignore result?
+        // TODO: destroy item too?
+        let _ = self.world.remove_location(item);
+        Ok(())
     }
 
+    // TODO: make this return a EcsResult of some sort?
     fn update_smells(&mut self) {
         let mut updated_smells: BTreeMap<_, _> =
             self.world.component::<Tile>().iter().filter_map(|(pos, &tile)| {
@@ -637,6 +664,7 @@ impl Game {
         self.smell_strength = updated_smells;
     }
 
+    // TODO: make this return a EcsResult of some sort
     fn locate_entity(&self, mut id: Entity) -> Option<Position> {
         for _ in 0..32 { // TODO: actual cycle detection?
             match self.world.entity(id).get() {

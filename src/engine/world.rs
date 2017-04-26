@@ -5,18 +5,40 @@ pub type EcsResult<T, E> = Result<T, EcsError<E>>;
 #[derive(Eq, PartialEq)]
 pub enum EcsError<T> {
     InCheckOnlyMode,
-    CheckFailure(T),
     ActionFailure(T),
+}
+
+// TODO: stop using Result<_ ()>
+impl<I: Id, C: Component> From<EcsError<LookupError<I, C>>> for EcsError<()> {
+    fn from(err: EcsError<LookupError<I, C>>) -> EcsError<()> {
+        match err {
+            EcsError::InCheckOnlyMode => EcsError::InCheckOnlyMode,
+            EcsError::ActionFailure(_) => EcsError::ActionFailure(()),
+        }
+    }
+}
+
+// TODO: stop using Result<_ ()>
+impl<T> From<T> for EcsError<T> {
+    fn from(err: T) -> EcsError<T> {
+        EcsError::ActionFailure(err)
+    }
 }
 
 pub trait Component {}
 
 pub trait World {
     fn new() -> Self;
+
+    // TODO: move this to WorldRef/Mut
+    fn err<T, E>(&self, e: E) -> EcsResult<T, E> {
+        Err(EcsError::ActionFailure(e))
+    }
 }
 
 pub trait Id: Copy + Eq {}
 
+// TODO: have WorldMut with mutation tracking
 pub trait EntityStorage<I: Id>: World {
     fn visit_component_types<V: VisitComponentTypes<Self, I>>(&self, v: &mut V)
         where Self: Sized;
@@ -45,6 +67,8 @@ pub trait EntityStorage<I: Id>: World {
         EntityMut {
             world: self,
             id: id,
+            committed: false,
+            // check_only: false,
         }
     }
 }
@@ -114,6 +138,7 @@ impl<I: Id, C: Component> LookupError<I, C> {
     }
 }
 
+// TODO: add mutation tracking so I can use CheckFailure in places
 #[derive(Copy, Clone)]
 pub struct EntityRef<'a, S: EntityStorage<I> + 'a, I: Id> {
     world: &'a S,
@@ -130,12 +155,13 @@ impl<'a, S: EntityStorage<I> + 'a, I: Id> EntityRef<'a, S, I> {
     pub fn get<C: Component>(&self) -> EcsResult<&'a C, LookupError<I, C>>
         where S: EntityComponent<I, C>, S::Storage: 'a
     {
-        self.world.component::<C>().get(self.id).ok_or(EcsError::CheckFailure(
-            LookupError {
-                id: self.id,
-                _phantom_data: PhantomData,
-            }
-        ))
+        self.world.component::<C>().get(self.id)
+            .ok_or_else(|| {
+                EcsError::ActionFailure(LookupError {
+                    id: self.id,
+                    _phantom_data: PhantomData,
+                })
+            })
     }
 
     pub fn id(&self) -> I {
@@ -147,11 +173,23 @@ impl<'a, S: EntityStorage<I> + 'a, I: Id> EntityRef<'a, S, I> {
     }
 }
 
+enum CheckGuard {
+    CheckOnly,
+    Uncommitted,
+    Committed,
+}
+
+// TODO: add mutation tracking so I can use CheckFailure in places
+// TODO: make this a trait so check_only is implicit in the type?
 pub struct EntityMut<'a, S: EntityStorage<I> + 'a, I: Id> {
     world: &'a mut S,
+    // TODO: switch to using CheckGuard
+    // check_guard: &'a mut CheckGuard,
+    committed: bool,
     id: I,
 }
 
+// TODO: use check_only to deny mutation
 impl<'a, S: EntityStorage<I> + 'a, I: Id> EntityMut<'a, S, I> {
     pub fn has<C: Component>(&self) -> bool
         where S: EntityComponent<I, C>
@@ -159,10 +197,10 @@ impl<'a, S: EntityStorage<I> + 'a, I: Id> EntityMut<'a, S, I> {
         self.world.component::<C>().has(self.id)
     }
 
-    pub fn get<C: Component>(&self) -> Option<&C>
-        where S: EntityComponent<I, C>
+    pub fn get<C: Component>(&self) -> EcsResult<&C, LookupError<I, C>>
+        where S: EntityComponent<I, C>, S::Storage: 'a
     {
-        self.world.component::<C>().get(self.id)
+        self.as_ref().get()
     }
 
     pub fn id(&self) -> I {
@@ -180,37 +218,65 @@ impl<'a, S: EntityStorage<I> + 'a, I: Id> EntityMut<'a, S, I> {
         }
     }
 
-    pub fn get_mut<C: Component>(&mut self) -> Option<&mut C>
+    pub fn get_mut<C: Component>(&mut self) -> EcsResult<&mut C, LookupError<I, C>>
         where S: EntityComponent<I, C>
     {
-        self.world.component_mut::<C>().get_mut(self.id)
+        match self.world.component_mut::<C>().get_mut(self.id) {
+            Some(r) => {
+                // TODO: figure out if there's a way to make commit() work
+                // self.commit();
+                self.committed = true;
+                Ok(r)
+            }
+            None => Err(EcsError::ActionFailure(LookupError {
+                id: self.id,
+                _phantom_data: PhantomData,
+            })),
+        }
     }
 
     pub fn insert<C: Component>(&mut self, c: C) -> Option<C>
         where S: EntityComponent<I, C>
     {
+        self.commit();
         self.world.component_mut::<C>().insert(self.id, c)
     }
 
-    pub fn remove<C: Component>(&mut self) -> Option<C>
+    pub fn remove<C: Component>(&mut self) -> EcsResult<C, LookupError<I, C>>
         where S: EntityComponent<I, C>
     {
-        self.world.component_mut::<C>().remove(self.id)
+        match self.world.component_mut::<C>().remove(self.id) {
+            Some(r) => {
+                self.commit();
+                Ok(r)
+            }
+            None => Err(EcsError::ActionFailure(LookupError {
+                id: self.id,
+                _phantom_data: PhantomData,
+            })),
+        }
     }
 
     pub fn get_or_else<C: Component, F: FnOnce() -> C>(&mut self, f: F) -> &mut C
         where S: EntityComponent<I, C>
     {
+        self.commit();
         self.world.component_mut::<C>().get_or_else(self.id, f)
     }
 
     pub fn get_or_default<C: Component + Default>(&mut self) -> &mut C
         where S: EntityComponent<I, C>
     {
+        self.commit();
         self.world.component_mut::<C>().get_or_default(self.id)
     }
 
-    pub fn world_mut(&mut self) -> &mut S {
-        &mut self.world
+    // TODO: return Result once we're using check_only mode
+    pub fn commit(&mut self) {
+        self.committed = true;
     }
+
+    // pub fn world_mut(&mut self) -> &mut S {
+    //     &mut self.world
+    // }
 }

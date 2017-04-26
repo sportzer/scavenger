@@ -275,7 +275,7 @@ fn move_towards(g: &mut Game, actor: Entity, pos: Position) -> bool {
     if actor_pos == Some(Location::Position(new_pos)) { return false; }
     if g.get_tile(new_pos).is_walkable() {
         let target = g.get_actor_by_position(new_pos);
-        if target.is_none() {
+        if target.is_err() {
             g.world.set_location(actor, Location::Position(new_pos));
             return true;
         }
@@ -298,8 +298,8 @@ fn move_randomly(g: &mut Game, actor: Entity) {
 
 impl AiState {
     pub fn take_turn(mut self, g: &mut Game, actor: Entity) -> AiState {
-        let actor_type: Option<EntityType> = g.world.entity(actor).get().ok().cloned();
-        let actor_pos: Option<Location> = g.world.entity(actor).get().ok().cloned();
+        let actor_type = g.world.entity(actor).get::<EntityType>().ok().cloned();
+        let actor_pos = g.world.entity(actor).get::<Location>().ok().cloned();
         if let (Some(actor_type), Some(Location::Position(actor_pos))) = (actor_type, actor_pos) {
             if let EntityClass::Actor { fov_range, smelling, ai: Some(ref ai), .. } = actor_type.data().class {
                 let player = (|| {
@@ -345,10 +345,13 @@ impl AiState {
                         return self;
                     }
                     AiState::Hunting(id, pos) => {
-                        if let Some(Location::Position(target_pos)) = g.world.entity(id).get().ok().cloned() {
+                        if let Some(Location::Position(target_pos)) =
+                            g.world.entity(id).get().ok().cloned()
+                        {
                             if actor_pos.distance_sq(target_pos) < 4 {
                                 // TODO: if stamina is at 0, do something else
-                                g.bump_attack(actor, id);
+                                // TODO: really ignore Result?
+                                let _ = g.bump_attack(actor, id);
                                 return self;
                             }
                         }
@@ -363,7 +366,6 @@ impl AiState {
                     }
                 }
 
-                // TODO: add hunting of corpses
                 if let Some((player_id, player_pos)) = player {
                     if ai.attack {
                         return AiState::Hunting(player_id, player_pos);
@@ -396,8 +398,10 @@ impl AiState {
                 // if ai.wanders {
                     if let AiState::Waiting = self {
                         return AiState::Wandering(Position {
-                            x: actor_pos.x + g.rand.gen_range(0, 2*fov_range) - g.rand.gen_range(0, 2*fov_range),
-                            y: actor_pos.y + g.rand.gen_range(0, 2*fov_range) - g.rand.gen_range(0, 2*fov_range),
+                            x: actor_pos.x + g.rand.gen_range(0, 2*fov_range)
+                                - g.rand.gen_range(0, 2*fov_range),
+                            y: actor_pos.y + g.rand.gen_range(0, 2*fov_range)
+                                - g.rand.gen_range(0, 2*fov_range),
                         });
                     }
                 // }
